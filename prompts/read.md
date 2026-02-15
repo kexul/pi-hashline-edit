@@ -1,5 +1,4 @@
-Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments.
+Read a file. For text files, each line is prefixed with `LINE:HASH|` (e.g., `12:abc12|content`). Use these references as anchors for the `edit` tool.
 
-For text files, each line is displayed as LINE:HASH|content where LINE is the 1-indexed line number and HASH is a short content hash. Use these LINE:HASH references when editing with the edit tool.
-
-Output is truncated to {{DEFAULT_MAX_LINES}} lines or {{DEFAULT_MAX_BYTES}} (whichever is hit first). Use offset/limit for large files.
+Images (jpg, png, gif, webp) are sent as attachments.
+Default limit: {{DEFAULT_MAX_LINES}} lines or {{DEFAULT_MAX_BYTES}}.
