@@ -1,18 +1,18 @@
 {
   "name": "pi-hashline-edit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Hashline read/edit tool override for pi-coding-agent",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mariozechner/pi-hashline-edit.git"
+    "url": "git+https://github.com/RimuruW/pi-hashline-edit.git"
   },
-  "author": "Mario Zechner",
+  "author": "RimuruW",
   "keywords": [
     "pi-package",
     "pi",
+    "coding-agent",
     "extension",
-    "hashline",
-    "edit"
+    "hashline"
   ],
   "license": "MIT",
   "files": [
