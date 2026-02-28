@@ -119,6 +119,20 @@ function splitDst(dst: string): string[] {
 	return dst === "" ? [] : dst.split("\n");
 }
 
+/**
+ * Parse replacement text into lines with prefix stripping and trailing blank removal.
+ * Matches parent's hashlineParseText semantics:
+ *   1. Split into lines
+ *   2. Strip hashline/diff prefixes
+ *   3. Remove trailing blank line (models frequently include a trailing newline)
+ */
+function parseDstText(dst: string): string[] {
+	const lines = stripNewLinePrefixes(splitDst(dst));
+	if (lines.length === 0) return lines;
+	if (lines[lines.length - 1].trim() === "") return lines.slice(0, -1);
+	return lines;
+}
+
 function stripNewLinePrefixes(lines: string[]): string[] {
 	let hashCount = 0;
 	let plusCount = 0;
@@ -147,7 +161,7 @@ function parseHashlineEditItem(edit: HashlineEditItem): ParsedEdit {
 	if ("set_line" in edit) {
 		return {
 			spec: { kind: "single", ref: parseLineRef(edit.set_line.anchor) },
-			dstLines: stripNewLinePrefixes(splitDst(edit.set_line.new_text)),
+			dstLines: parseDstText(edit.set_line.new_text),
 		};
 	}
 	if ("replace_lines" in edit) {
@@ -155,13 +169,13 @@ function parseHashlineEditItem(edit: HashlineEditItem): ParsedEdit {
 		const end = parseLineRef(edit.replace_lines.end_anchor);
 		return {
 			spec: start.line === end.line ? { kind: "single", ref: start } : { kind: "range", start, end },
-			dstLines: stripNewLinePrefixes(splitDst(edit.replace_lines.new_text)),
+			dstLines: parseDstText(edit.replace_lines.new_text),
 		};
 	}
 	if ("insert_after" in edit) {
 		return {
 			spec: { kind: "insertAfter", after: parseLineRef(edit.insert_after.anchor) },
-			dstLines: stripNewLinePrefixes(splitDst(edit.insert_after.text ?? "")),
+			dstLines: parseDstText(edit.insert_after.text ?? ""),
 		};
 	}
 	throw new Error("replace edits are applied separately");
