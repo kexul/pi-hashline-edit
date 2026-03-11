@@ -7,7 +7,7 @@ export type LegacyTopLevelReplace = {
 export function extractLegacyTopLevelReplace(
   request: Record<string, unknown>,
 ): LegacyTopLevelReplace | null {
-  if (Array.isArray(request.edits)) {
+  if (Array.isArray(request.edits) && request.edits.length > 0) {
     return null;
   }
 

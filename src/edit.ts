@@ -43,24 +43,24 @@ const hashlineEditItemSchema = Type.Object(
   { additionalProperties: false },
 );
 
-const hashlineEditBaseSchema = Type.Object(
+const hashlineEditToolSchema = Type.Object(
   {
     path: Type.String({ description: "path" }),
+    edits: Type.Optional(
+      Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
+    ),
+    oldText: Type.Optional(Type.String({ description: "legacy exact-match replace old text" })),
+    newText: Type.Optional(Type.String({ description: "legacy exact-match replace new text" })),
+    old_text: Type.Optional(
+      Type.String({ description: "legacy exact-match replace old text (snake_case)" }),
+    ),
+    new_text: Type.Optional(
+      Type.String({ description: "legacy exact-match replace new text (snake_case)" }),
+    ),
   },
   { additionalProperties: false },
 );
 
-const hashlineEditToolSchema = Type.Composite([
-  hashlineEditBaseSchema,
-  Type.Object(
-    {
-      edits: Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
-    },
-    { additionalProperties: false },
-  ),
-]);
-
-// Internal validation also accepts the hidden legacy top-level replace payload.
 const hashlineEditSchema = hashlineEditToolSchema;
 
 type EditRequestParams = Static<typeof hashlineEditSchema>;
@@ -114,12 +114,21 @@ export function assertEditRequest(request: unknown): asserts request is EditRequ
     }
   }
 
-  const hasAnyLegacyKey = LEGACY_KEYS.some((key) => hasOwn(request, key));
-  if (!Array.isArray(request.edits) && hasAnyLegacyKey) {
+  const hasCamelLegacy = hasOwn(request, "oldText") || hasOwn(request, "newText");
+  const hasSnakeLegacy = hasOwn(request, "old_text") || hasOwn(request, "new_text");
+  if (hasCamelLegacy && hasSnakeLegacy) {
+    throw new Error(
+      'Edit request cannot mix legacy camelCase and snake_case fields. Use either oldText/newText or old_text/new_text.',
+    );
+  }
+
+  const hasAnyLegacyKey = hasCamelLegacy || hasSnakeLegacy;
+  const hasStructuredEdits = Array.isArray(request.edits) && request.edits.length > 0;
+  if (hasAnyLegacyKey && !hasStructuredEdits) {
     const legacy = extractLegacyTopLevelReplace(request);
     if (!legacy) {
       throw new Error(
-        'Legacy top-level replace requires both oldText/newText or old_text/new_text when "edits" is absent.',
+        'Legacy top-level replace requires both oldText/newText or old_text/new_text.',
       );
     }
   }

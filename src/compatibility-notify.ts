@@ -1,5 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
+type SessionState = {
+  activeTurn: number;
+  compatibilityCount: number;
+};
+
 function getSessionKey(ctx: ExtensionContext): string {
   const sessionFile = ctx.sessionManager?.getSessionFile?.();
   if (sessionFile) {
@@ -15,10 +20,15 @@ function getSessionKey(ctx: ExtensionContext): string {
 }
 
 export function registerCompatibilityNotifications(pi: ExtensionAPI): void {
-  const compatibilityCounts = new Map<string, number>();
+  const sessionStates = new Map<string, SessionState>();
 
   pi.on("turn_start", async (_event, ctx) => {
-    compatibilityCounts.set(getSessionKey(ctx), 0);
+    const sessionKey = getSessionKey(ctx);
+    const previous = sessionStates.get(sessionKey);
+    sessionStates.set(sessionKey, {
+      activeTurn: (previous?.activeTurn ?? 0) + 1,
+      compatibilityCount: 0,
+    });
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -34,18 +44,25 @@ export function registerCompatibilityNotifications(pi: ExtensionAPI): void {
         }
       | undefined;
 
-    if (details?.compatibility?.used) {
-      const sessionKey = getSessionKey(ctx);
-      compatibilityCounts.set(sessionKey, (compatibilityCounts.get(sessionKey) ?? 0) + 1);
+    if (!details?.compatibility?.used) {
+      return;
     }
+
+    const sessionKey = getSessionKey(ctx);
+    const state = sessionStates.get(sessionKey) ?? { activeTurn: 0, compatibilityCount: 0 };
+    sessionStates.set(sessionKey, {
+      activeTurn: state.activeTurn,
+      compatibilityCount: state.compatibilityCount + 1,
+    });
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     const sessionKey = getSessionKey(ctx);
-    const compatibilityCount = compatibilityCounts.get(sessionKey) ?? 0;
+    const state = sessionStates.get(sessionKey);
+    const compatibilityCount = state?.compatibilityCount ?? 0;
 
     if (!ctx.hasUI || compatibilityCount === 0) {
-      compatibilityCounts.delete(sessionKey);
+      sessionStates.delete(sessionKey);
       return;
     }
 
@@ -53,6 +70,6 @@ export function registerCompatibilityNotifications(pi: ExtensionAPI): void {
       `Edit compatibility mode used for ${compatibilityCount} edit(s)`,
       "warning",
     );
-    compatibilityCounts.delete(sessionKey);
+    sessionStates.delete(sessionKey);
   });
 }

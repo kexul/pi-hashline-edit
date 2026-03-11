@@ -36,7 +36,7 @@ describe("assertEditRequest", () => {
 });
 
 describe("registerEditTool", () => {
-  it("publishes only the strict public edit schema", () => {
+  it("publishes the compatibility-aware edit schema", () => {
     let registered: { parameters?: any } | undefined;
     const pi = {
       registerTool(tool: { parameters?: any }) {
@@ -48,11 +48,19 @@ describe("registerEditTool", () => {
 
     expect(registered?.parameters).toBeDefined();
     expect(registered!.parameters.type).toBe("object");
-    expect(Object.keys(registered!.parameters.properties)).toEqual(["path", "edits"]);
-    expect(registered!.parameters.required).toEqual(["path", "edits"]);
-    expect(registered!.parameters.properties.oldText).toBeUndefined();
-    expect(registered!.parameters.properties.newText).toBeUndefined();
-    expect(registered!.parameters.properties.old_text).toBeUndefined();
-    expect(registered!.parameters.properties.new_text).toBeUndefined();
+    expect(Object.keys(registered!.parameters.properties)).toEqual([
+      "path",
+      "edits",
+      "oldText",
+      "newText",
+      "old_text",
+      "new_text",
+    ]);
+    expect(registered!.parameters.required).toEqual(["path"]);
+    expect(registered!.parameters.properties.edits).toBeDefined();
+    expect(registered!.parameters.properties.oldText?.type).toBe("string");
+    expect(registered!.parameters.properties.newText?.type).toBe("string");
+    expect(registered!.parameters.properties.old_text?.type).toBe("string");
+    expect(registered!.parameters.properties.new_text?.type).toBe("string");
   });
 });

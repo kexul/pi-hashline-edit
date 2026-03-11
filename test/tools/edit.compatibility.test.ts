@@ -41,11 +41,26 @@ describe("extractLegacyTopLevelReplace", () => {
     });
   });
 
-  it("returns null when edits[] is present", () => {
+  it("accepts legacy payload when edits[] is present but empty", () => {
     expect(
       extractLegacyTopLevelReplace({
         path: "a.ts",
         edits: [],
+        oldText: "before",
+        newText: "after",
+      }),
+    ).toEqual({
+      oldText: "before",
+      newText: "after",
+      strategy: "legacy-top-level-replace",
+    });
+  });
+
+  it("returns null when edits[] contains hashline edits", () => {
+    expect(
+      extractLegacyTopLevelReplace({
+        path: "a.ts",
+        edits: [{ op: "replace", pos: "1#abc", lines: ["after"] }],
         oldText: "before",
         newText: "after",
       }),
@@ -172,6 +187,59 @@ describe("edit tool compatibility mode", () => {
         expect(await readFile(path, "utf-8")).toBe("ALPHA\r\nBETA\r\ngamma\r\n");
       },
     );
+  });
+
+  it("falls back to legacy replace when edits is an empty array", async () => {
+    await withTempFile("sample.txt", "aaa\nbbb\nccc\n", async ({ cwd, path }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const editTool = getTool("edit");
+
+      const result = await editTool.execute(
+        "e1",
+        {
+          path: "sample.txt",
+          edits: [],
+          oldText: "bbb",
+          newText: "BBB",
+        },
+        undefined,
+        undefined,
+        { cwd, hasUI: true, ui: { notify() {} } } as any,
+      );
+
+      expect(getText(result)).toContain("Updated sample.txt");
+      expect(result.details).toMatchObject({
+        compatibility: {
+          used: true,
+          strategy: "legacy-top-level-replace",
+          matchCount: 1,
+        },
+      });
+      expect(await readFile(path, "utf-8")).toBe("aaa\nBBB\nccc\n");
+    });
+  });
+
+  it("rejects mixed camelCase and snake_case legacy payloads", async () => {
+    await withTempFile("sample.txt", "aaa\nbbb\nccc\n", async ({ cwd }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const editTool = getTool("edit");
+
+      await expect(
+        editTool.execute(
+          "e1",
+          {
+            path: "sample.txt",
+            oldText: "bbb",
+            new_text: "BBB",
+          },
+          undefined,
+          undefined,
+          { cwd, hasUI: true, ui: { notify() {} } } as any,
+        ),
+      ).rejects.toThrow(/cannot mix legacy camelCase and snake_case/i);
+    });
   });
 
   it("prefers strict hashline edits when edits is present", async () => {
