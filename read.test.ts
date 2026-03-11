@@ -8,4 +8,20 @@ describe("formatHashlineReadPreview", () => {
 
     expect(result.text).toContain("Hashline output requires full lines");
   });
+
+  it("formats ordinary lines as full hashlines", () => {
+    const result = formatHashlineReadPreview("alpha\nbeta", { offset: 1 });
+
+    expect(result.text).toContain("1#");
+    expect(result.text).toContain(":alpha");
+  });
+
+  it("keeps continuation hints for partial previews", () => {
+    const result = formatHashlineReadPreview("alpha\nbeta", {
+      offset: 1,
+      limit: 1,
+    });
+
+    expect(result.text).toContain("Use offset=2 to continue");
+  });
 });
