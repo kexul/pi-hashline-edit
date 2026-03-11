@@ -43,6 +43,18 @@ const hashlineEditItemSchema = Type.Object(
   { additionalProperties: false },
 );
 
+// Schema for tool registration (excludes legacy fields to hide compatibility from the model)
+const hashlineEditToolSchema = Type.Object(
+  {
+    path: Type.String({ description: "path" }),
+    edits: Type.Optional(
+      Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+// Full schema for internal validation (includes legacy fields for backward compatibility)
 const hashlineEditSchema = Type.Object(
   {
     path: Type.String({ description: "path" }),
@@ -141,7 +153,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
     name: "edit",
     label: "Edit",
     description: EDIT_DESC,
-    parameters: hashlineEditSchema,
+    parameters: hashlineEditToolSchema,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       assertEditRequest(params);
@@ -197,10 +209,13 @@ export function registerEditTool(pi: ExtensionAPI): void {
         noopEdits = anchorResult.noopEdits;
         firstChangedLine = anchorResult.firstChangedLine;
       } else {
+        // Normalize newText to LF before replacement to avoid \r\r\n corruption
+        // when restoreLineEndings is applied later
+        const normalizedNewText = normalizeToLF(legacy!.newText);
         const replaced = applyExactUniqueLegacyReplace(
           originalNormalized,
           legacy!.oldText,
-          legacy!.newText,
+          normalizedNewText,
         );
         result = replaced.content;
         compatibilityDetails = {

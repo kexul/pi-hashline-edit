@@ -55,7 +55,17 @@ export function applyExactUniqueLegacyReplace(
       break;
     }
     matches.push(index);
-    from = index + Math.max(1, oldText.length);
+    from = index + 1; // Advance by 1 to detect all potential matches, including overlapping ones
+  }
+
+  // Check for overlapping matches: if any two matches are less than oldText.length apart,
+  // they overlap and should be treated as ambiguous
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i]! - matches[i - 1]! < oldText.length) {
+      throw new Error(
+        "Legacy compatibility replace found overlapping matches; re-read and use hashline edits.",
+      );
+    }
   }
 
   if (matches.length === 0) {
