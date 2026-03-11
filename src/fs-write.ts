@@ -1,45 +1,61 @@
 import { randomUUID } from "crypto";
-import { chmod, lstat, mkdir, readlink, realpath, rename, stat, writeFile } from "fs/promises";
+import { chmod, lstat, mkdir, readlink, rename, stat, writeFile } from "fs/promises";
 import { dirname, join, resolve } from "path";
 
 async function resolveAtomicWritePath(path: string): Promise<string> {
-  try {
-    if (!(await lstat(path)).isSymbolicLink()) {
-      return path;
-    }
-  } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      return path;
-    }
-    throw error;
-  }
+  let currentPath = path;
+  const visited = new Set<string>();
 
-  try {
-    return await realpath(path);
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") {
+  while (true) {
+    if (visited.has(currentPath)) {
+      const error: any = new Error(`Too many symbolic links while resolving ${path}`);
+      error.code = "ELOOP";
+      throw error;
+    }
+    visited.add(currentPath);
+
+    try {
+      if (!(await lstat(currentPath)).isSymbolicLink()) {
+        return currentPath;
+      }
+    } catch (error: any) {
+      if (error?.code === "ENOENT") {
+        return currentPath;
+      }
       throw error;
     }
 
-    return resolve(dirname(path), await readlink(path));
+    currentPath = resolve(dirname(currentPath), await readlink(currentPath));
   }
 }
+
 export async function writeFileAtomically(
   path: string,
   content: string,
 ): Promise<void> {
   const targetPath = await resolveAtomicWritePath(path);
-  const dir = dirname(targetPath);
-  const tempPath = join(dir, `.tmp-${randomUUID()}`);
-  await mkdir(dir, { recursive: true });
-  await writeFile(tempPath, content, "utf-8");
+
+  let existingStats: Awaited<ReturnType<typeof stat>> | null = null;
   try {
-    const existingMode = (await stat(targetPath)).mode & 0o7777;
-    await chmod(tempPath, existingMode);
+    existingStats = await stat(targetPath);
   } catch (error: any) {
     if (error?.code !== "ENOENT") {
       throw error;
     }
+  }
+
+  if (existingStats && existingStats.nlink > 1) {
+    await writeFile(targetPath, content, "utf-8");
+    return;
+  }
+
+  const dir = dirname(targetPath);
+  const tempPath = join(dir, `.tmp-${randomUUID()}`);
+  await mkdir(dir, { recursive: true });
+  await writeFile(tempPath, content, "utf-8");
+
+  if (existingStats) {
+    await chmod(tempPath, existingStats.mode & 0o7777);
   }
 
   await rename(tempPath, targetPath);
