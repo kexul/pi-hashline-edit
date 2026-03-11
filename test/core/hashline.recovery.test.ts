@@ -6,7 +6,7 @@ import {
   type Anchor,
   type HashlineEdit,
   type HashlineToolEdit,
-} from "./src/hashline";
+} from "../../src/hashline";
 
 function makeTag(lineNum: number, text: string): Anchor {
   return { line: lineNum, hash: computeLineHash(lineNum, text) };
