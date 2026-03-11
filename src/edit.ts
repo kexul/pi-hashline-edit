@@ -49,19 +49,21 @@ const hashlineEditToolSchema = Type.Object(
     edits: Type.Optional(
       Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
     ),
-    oldText: Type.Optional(Type.String({ description: "legacy exact-match replace old text" })),
-    newText: Type.Optional(Type.String({ description: "legacy exact-match replace new text" })),
-    old_text: Type.Optional(
-      Type.String({ description: "legacy exact-match replace old text (snake_case)" }),
-    ),
-    new_text: Type.Optional(
-      Type.String({ description: "legacy exact-match replace new text (snake_case)" }),
-    ),
   },
   { additionalProperties: false },
 );
 
-const hashlineEditSchema = hashlineEditToolSchema;
+const hashlineEditSchema = Type.Object(
+  {
+    path: Type.String(),
+    edits: Type.Optional(Type.Array(hashlineEditItemSchema)),
+    oldText: Type.Optional(Type.String()),
+    newText: Type.Optional(Type.String()),
+    old_text: Type.Optional(Type.String()),
+    new_text: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
 
 type EditRequestParams = Static<typeof hashlineEditSchema>;
 
