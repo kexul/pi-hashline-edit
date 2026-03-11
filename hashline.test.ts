@@ -614,12 +614,26 @@ describe("applyHashlineEdits — error handling", () => {
       /2 lines have changed/,
     );
   });
+
+  it("mismatch message does not mention relocation", () => {
+    expect(() =>
+      applyHashlineEdits("aaa", [
+        {
+          op: "replace",
+          pos: { line: 1, hash: "ZZ" },
+          lines: ["bbb"],
+        } as any,
+      ]),
+    ).toThrow(/Use the updated LINE#HASH references/);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // applyHashlineEdits — heuristics
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Only explicit input cleanup plus this boundary-duplicate correction remain as
+// default assist heuristics; hidden intent-recovery behavior is intentionally excluded.
 describe("applyHashlineEdits — heuristics", () => {
   it("auto-corrects trailing duplicate on range replace", () => {
     const content = "if (ok) {\n  run();\n}\nafter();";
@@ -727,45 +741,6 @@ describe("applyHashlineEdits — heuristics", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// applyHashlineEdits — relocation
-// ═══════════════════════════════════════════════════════════════════════════
-
-describe("applyHashlineEdits — relocation", () => {
-  it("auto-relocates when a line has shifted within ±20 lines", () => {
-    // Build content where line 5 has unique content, then shift it to line 7
-    const original = ["a", "b", "c", "d", "UNIQUE_LINE", "f", "g"];
-    const shifted = [
-      "a",
-      "b",
-      "INSERTED1",
-      "INSERTED2",
-      "c",
-      "d",
-      "UNIQUE_LINE",
-      "f",
-      "g",
-    ];
-    const shiftedContent = shifted.join("\n");
-    // Get the hash of UNIQUE_LINE at its original position (5)
-    const originalHash = computeLineHash(5, "UNIQUE_LINE");
-    // It's now at line 7 — the hash at position 7 is different (index mixed for non-significant? No, UNIQUE_LINE has alphanumeric)
-    // Actually for alphanumeric lines, hash is position-independent, so the hash should match
-    const edits: HashlineEdit[] = [
-      {
-        op: "replace",
-        pos: { line: 5, hash: originalHash },
-        lines: ["REPLACED"],
-      },
-    ];
-    const result = applyHashlineEdits(shiftedContent, edits);
-    expect(result.content).toBe(
-      "a\nb\nINSERTED1\nINSERTED2\nc\nd\nREPLACED\nf\ng",
-    );
-    expect(result.warnings).toBeDefined();
-    expect(result.warnings![0]).toContain("Auto-relocated");
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Integration: resolveEditAnchors → applyHashlineEdits

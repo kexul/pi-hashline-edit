@@ -50,7 +50,6 @@ const DICT = Array.from({ length: 256 }, (_, i) => {
 const HASHLINE_PREFIX_RE =
   /^\s*(?:>>>|>>)?\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
 const DIFF_PLUS_RE = /^\+(?!\+)/;
-const HASH_RELOCATION_WINDOW = 20;
 
 /** Lines containing no alphanumeric characters (only punctuation/symbols/whitespace). */
 const RE_SIGNIFICANT = /[\p{L}\p{N}]/u;
@@ -265,64 +264,15 @@ export function applyHashlineEdits(
   const noopEdits: NoopEdit[] = [];
   const warnings: string[] = [];
 
-  // Build hash index for local-window relocation
-  const lineHashes: string[] = [];
-  const hashToLines = new Map<string, number[]>();
-  for (let i = 0; i < fileLines.length; i++) {
-    throwIfAborted(signal);
-    const lineNumber = i + 1;
-    const h = computeLineHash(lineNumber, fileLines[i]);
-    lineHashes.push(h);
-    const bucket = hashToLines.get(h);
-    if (bucket) bucket.push(lineNumber);
-    else hashToLines.set(h, [lineNumber]);
-  }
-
-  const relocationNotes = new Set<string>();
-
-  function findRelocationLine(
-    expectedHash: string,
-    hintLine: number,
-  ): number | undefined {
-    const candidates = hashToLines.get(expectedHash);
-    if (!candidates?.length) return undefined;
-
-    const minLine = Math.max(1, hintLine - HASH_RELOCATION_WINDOW);
-    const maxLine = Math.min(
-      fileLines.length,
-      hintLine + HASH_RELOCATION_WINDOW,
-    );
-    let match: number | undefined;
-
-    for (const candidate of candidates) {
-      if (candidate < minLine || candidate > maxLine) continue;
-      if (match !== undefined) return undefined; // ambiguous within window
-      match = candidate;
-    }
-    return match;
-  }
-
   // Validate all refs before mutation
   const mismatches: HashMismatch[] = [];
-
   function validate(ref: Anchor): boolean {
-    if (ref.line < 1 || ref.line > fileLines.length)
-      throw new Error(
-        `Line ${ref.line} does not exist (file has ${fileLines.length} lines)`,
-      );
-    const expected = ref.hash;
-    const originalLine = ref.line;
-    const actual = lineHashes[originalLine - 1];
-    if (actual === expected) return true;
-    const relocated = findRelocationLine(expected, originalLine);
-    if (relocated !== undefined) {
-      ref.line = relocated;
-      relocationNotes.add(
-        `Auto-relocated anchor ${originalLine}#${ref.hash} -> ${relocated}#${ref.hash} (window ±${HASH_RELOCATION_WINDOW}).`,
-      );
-      return true;
+    if (ref.line < 1 || ref.line > fileLines.length) {
+      throw new Error(`Line ${ref.line} does not exist (file has ${fileLines.length} lines)`);
     }
-    mismatches.push({ line: originalLine, expected: ref.hash, actual });
+    const actual = computeLineHash(ref.line, fileLines[ref.line - 1]);
+    if (actual === ref.hash) return true;
+    mismatches.push({ line: ref.line, expected: ref.hash, actual });
     return false;
   }
 
@@ -332,40 +282,14 @@ export function applyHashlineEdits(
     switch (edit.op) {
       case "replace": {
         if (edit.end) {
-          const originalStart = edit.pos.line;
-          const originalEnd = edit.end.line;
-          const originalCount = originalEnd - originalStart + 1;
-
-          if (originalStart > originalEnd) {
+          if (edit.pos.line > edit.end.line) {
             throw new Error(
-              `Range start line ${originalStart} must be <= end line ${originalEnd}`,
+              `Range start line ${edit.pos.line} must be <= end line ${edit.end.line}`,
             );
           }
-
           const startOk = validate(edit.pos);
           const endOk = validate(edit.end);
           if (!startOk || !endOk) continue;
-
-          // If both validated but relocation invalidated the range, revert and report mismatch
-          const relocatedCount = edit.end.line - edit.pos.line + 1;
-          const invalidRange = edit.pos.line > edit.end.line;
-          const scopeChanged = relocatedCount !== originalCount;
-          if (invalidRange || scopeChanged) {
-            edit.pos.line = originalStart;
-            edit.end.line = originalEnd;
-            mismatches.push(
-              {
-                line: originalStart,
-                expected: edit.pos.hash,
-                actual: lineHashes[originalStart - 1],
-              },
-              {
-                line: originalEnd,
-                expected: edit.end.hash,
-                actual: lineHashes[originalEnd - 1],
-              },
-            );
-          }
         } else {
           if (!validate(edit.pos)) continue;
         }
@@ -467,7 +391,6 @@ export function applyHashlineEdits(
       b.sortLine - a.sortLine || a.precedence - b.precedence || a.idx - b.idx,
   );
 
-  warnings.push(...relocationNotes);
 
   // Apply edits bottom-up
   for (const { edit, idx } of annotated) {
