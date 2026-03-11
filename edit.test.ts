@@ -4,7 +4,7 @@ import { assertStrictHashlineRequest } from "./src/edit";
 describe("assertStrictHashlineRequest", () => {
   it("rejects unknown or unsupported root fields", () => {
     expect(() =>
-      assertStrictHashlineRequest({ path: "a.ts", text_replace: [] } as any),
+      assertStrictHashlineRequest({ path: "a.ts", legacy_field: [] } as any),
     ).toThrow(/unknown or unsupported fields/i);
   });
 });

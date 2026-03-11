@@ -2,18 +2,25 @@
 
 # pi-hashline-edit
 
-A [pi coding agent](https://github.com/mariozechner/pi-coding-agent) extension that overrides the built-in `read` and `edit` tools with content-anchored line references (`LINE#HASH:content`).
+A [pi coding agent](https://github.com/mariozechner/pi-coding-agent) extension that overrides the built-in `read` and `edit` tools with strict `LINE#HASH:content` references.
 
-Based on [oh-my-pi](https://github.com/can1357/oh-my-pi)'s hashline engine. Hashline anchors let the LLM target exact lines by content hash rather than fragile line numbers, reducing edit drift and incorrect replacements.
+Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi), but narrowed to fit pi's minimal and reliability-first philosophy: a small surface, explicit integrity checks, and no fallback modes that hide stale context.
 
 ---
 
-## How It Works
+## What it overrides
 
-### 1. Read
-The `read` tool outputs each line with a unique identifier: `LINE#HASH:content`.
-- **LINE**: The current line number (1-indexed).
-- **HASH**: A 2-character content hash from a custom alphabet (`ZPMQVRWSNKTXJBYH`).
+- `read`
+- `edit`
+
+This extension intentionally avoids any separate search override workflow.
+
+---
+
+## How it works
+
+### Read
+`read` returns text files as full tagged lines:
 
 ```text
 10#VR:function hello() {
@@ -21,8 +28,13 @@ The `read` tool outputs each line with a unique identifier: `LINE#HASH:content`.
 12#BH:}
 ```
 
-### 2. Edit
-The `edit` tool uses these anchors to perform surgical modifications via a flat `{op, pos, end, lines}` schema:
+- `LINE` is the current 1-indexed line number.
+- `HASH` is a 2-character content hash from the custom alphabet `ZPMQVRWSNKTXJBYH`.
+
+If the first selected line is too large to fit safely within the read budget, `read` returns an advisory instead of a partial tagged line. That prevents unusable or misleading anchors.
+
+### Edit
+`edit` accepts only this payload shape:
 
 ```json
 {
@@ -37,36 +49,24 @@ The `edit` tool uses these anchors to perform surgical modifications via a flat 
 }
 ```
 
-#### Operations
+Supported operations:
+
 | Op | Purpose |
 |---|---|
-| `replace` | Replace a single line (`pos`) or range (`pos` + `end`). `lines: null` deletes. |
-| `append` | Insert new lines after `pos`. Omit `pos` for end of file. |
-| `prepend` | Insert new lines before `pos`. Omit `pos` for beginning of file. |
-
-#### File-level operations
-| Field | Purpose |
-|---|---|
-| `delete: true` | Delete the file. Cannot be combined with other operations. |
-| `move: "new/path"` | Move/rename the file. Edits are applied first. Rejects if destination exists. |
-| `text_replace` | Fallback substring replacement (no anchors needed). |
+| `replace` | Replace one line (`pos`) or an inclusive range (`pos` + `end`). `lines: null` or `[]` deletes the line(s). |
+| `append` | Insert after `pos`. Omit `pos` for end of file. |
+| `prepend` | Insert before `pos`. Omit `pos` for beginning of file. |
 
 ---
 
-## Key Features
+## Strictness guarantees
 
-- **Smart Relocation**: If a line number drifts, the tool relocates by `HASH` within a ±20 line window. Only triggers when the hash match is unique in that window.
-- **Boundary Duplicate Correction**: Detects when a model echoes the line before or after a range replace and auto-corrects to prevent doubled lines.
-- **Hallucination-Resistant Hashes**: Uses a 16-character alphabet that excludes hex digits (A–F), confusable letters, and most vowels. References like `MQ` or `ZP` can never be mistaken for code content.
-- **Prefix Stripping**: Removes hashline display prefixes from replacement text when 100% of non-empty lines carry the prefix. The regex is constrained to exactly 2 NIBBLE_STR characters to avoid false-matching comment patterns like `# Note:`.
-- **Conflict Diagnostics**: If hashes don't match and relocation fails, the tool rejects the edit with a diff-like error showing what changed and the new `LINE#HASH` references.
-- **Atomic Application**: All edits in a single call are validated against the file state before any writes occur. Edits are applied bottom-up to preserve line numbering.
-
----
-
-## Design Divergences from oh-my-pi
-
-This extension shares oh-my-pi's core hashline engine and regularly backports upstream bug fixes. It deliberately takes a **stricter approach** to validation and error handling in several areas — stricter anchor parsing, file operation guards, explicit error on empty payloads, auto-relocation, and a `text_replace` fallback. See **[docs/divergences.md](docs/divergences.md)** for the full comparison and rationale.
+- **Stale anchors fail**: mismatches do not relocate. Re-read and use the updated `LINE#HASH` references from the error snippet.
+- **No substring fallback**: edits must use hash anchors instead of legacy free-text replacement modes.
+- **No destructive file ops**: there is no delete or move surface.
+- **Atomic application**: all edits validate against the same pre-edit snapshot and apply bottom-up.
+- **Limited assist behavior**: the core strips copied display prefixes and keeps one explicit boundary-duplicate correction for safe range edits.
+- **Whitespace-aware hashing**: internal spaces remain significant; trailing spaces are ignored.
 
 ---
 
@@ -86,18 +86,16 @@ bun install
 
 ## Testing
 
-This repository uses **Bun** for dependency management and test execution.
-
 ```bash
 bun test
 ```
 
-## Technical Details
+## Technical notes
 
-- **Hashing**: Uses `xxhashjs` for deterministic 32-bit hashes, truncated to 2 characters from a custom alphabet.
-- **Hash Alphabet**: `ZPMQVRWSNKTXJBYH` — 16 consonants chosen to be visually distinct from digits and disjoint from hex.
-- **Symbol-Line Seeding**: Lines with no alphanumeric content (e.g., `}`, `---`, blank lines) mix the line number into the hash seed to prevent collisions on structural markers.
-- **Safety**: Atomic application — all edits validated before any writes. Strict anchor parsing, file operation guards, and conflict detection.
+- **Hashing**: uses `xxhashjs` for deterministic 32-bit hashes, mapped to a custom 2-character alphabet.
+- **Symbol-line seeding**: lines with no alphanumeric content mix in their line number to reduce collisions on structural markers.
+- **Read safety**: tagged previews are emitted only for complete lines.
+- **Edit integrity**: malformed or stale anchors fail loudly instead of being guessed or repaired implicitly.
 
 ## Credits
 
