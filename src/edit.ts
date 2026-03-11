@@ -5,6 +5,7 @@ import { constants } from "fs";
 import { readFileSync } from "fs";
 import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
 import {
+  buildCompactHashlineDiffPreview,
   detectLineEnding,
   generateDiffString,
   normalizeToLF,
@@ -233,12 +234,21 @@ export function registerEditTool(pi: ExtensionAPI): void {
       );
 
       const diffResult = generateDiffString(originalNormalized, result);
+      const preview = buildCompactHashlineDiffPreview(diffResult.diff);
+      const summaryLine = `Changes: +${preview.addedLines} -${preview.removedLines}${preview.preview ? "" : " (no textual diff preview)"}`;
+      const previewBlock = preview.preview
+        ? `\n\nDiff preview:\n${preview.preview}`
+        : "";
       const warningsBlock = warnings?.length
         ? `\n\nWarnings:\n${warnings.join("\n")}`
         : "";
-
       return {
-        content: [{ type: "text", text: `Updated ${path}${warningsBlock}` }],
+        content: [
+          {
+            type: "text",
+            text: `Updated ${path}\n${summaryLine}${previewBlock}${warningsBlock}`,
+          },
+        ],
         details: {
           diff: diffResult.diff,
           firstChangedLine: firstChangedLine ?? diffResult.firstChangedLine,

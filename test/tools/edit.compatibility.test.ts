@@ -93,7 +93,9 @@ describe("edit tool compatibility mode", () => {
         { cwd, hasUI: true, ui: { notify() {} } } as any,
       );
 
-      expect(getText(result)).toBe("Updated sample.txt");
+      expect(getText(result)).toContain("Updated sample.txt");
+      expect(getText(result)).toContain("Changes: +1 -1");
+      expect(getText(result)).toContain("Diff preview:");
       expect(getText(result)).not.toMatch(/compatibility|fallback/i);
       expect(result.details).toMatchObject({
         compatibility: {
@@ -148,7 +150,9 @@ describe("edit tool compatibility mode", () => {
         { cwd, hasUI: true, ui: { notify() {} } } as any,
       );
 
-      expect(getText(result)).toBe("Updated sample.txt");
+      expect(getText(result)).toContain("Updated sample.txt");
+      expect(getText(result)).toContain("Changes: +1 -1");
+      expect(getText(result)).toContain("Diff preview:");
       expect(result.details?.compatibility).toBeUndefined();
       expect(await readFile(path, "utf-8")).toBe("aaa\nBBB\nccc\n");
     });
