@@ -11,28 +11,29 @@ export function extractLegacyTopLevelReplace(
     return null;
   }
 
-  const oldText =
-    typeof request.oldText === "string"
-      ? request.oldText
-      : typeof request.old_text === "string"
-        ? request.old_text
-        : null;
-  const newText =
-    typeof request.newText === "string"
-      ? request.newText
-      : typeof request.new_text === "string"
-        ? request.new_text
-        : null;
-
-  if (oldText === null || newText === null) {
+  const hasCamel = "oldText" in request || "newText" in request;
+  const hasSnake = "old_text" in request || "new_text" in request;
+  if (hasCamel && hasSnake) {
     return null;
   }
 
-  return {
-    oldText,
-    newText,
-    strategy: "legacy-top-level-replace",
-  };
+  if (typeof request.oldText === "string" && typeof request.newText === "string") {
+    return {
+      oldText: request.oldText,
+      newText: request.newText,
+      strategy: "legacy-top-level-replace",
+    };
+  }
+
+  if (typeof request.old_text === "string" && typeof request.new_text === "string") {
+    return {
+      oldText: request.old_text,
+      newText: request.new_text,
+      strategy: "legacy-top-level-replace",
+    };
+  }
+
+  return null;
 }
 
 export function applyExactUniqueLegacyReplace(

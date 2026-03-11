@@ -51,6 +51,16 @@ describe("extractLegacyTopLevelReplace", () => {
       }),
     ).toBeNull();
   });
+
+  it("rejects mixed-case legacy payloads", () => {
+    expect(
+      extractLegacyTopLevelReplace({
+        path: "a.ts",
+        oldText: "before",
+        new_text: "after",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("applyExactUniqueLegacyReplace", () => {
