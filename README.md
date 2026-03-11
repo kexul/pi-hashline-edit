@@ -2,7 +2,7 @@
 
 # pi-hashline-edit
 
-A [pi coding agent](https://github.com/mariozechner/pi-coding-agent) extension that overrides the built-in `read`, `grep`, and `edit` tools with content-anchored line references (`LINE#HASH:content`).
+A [pi coding agent](https://github.com/mariozechner/pi-coding-agent) extension that overrides the built-in `read` and `edit` tools with content-anchored line references (`LINE#HASH:content`).
 
 Based on [oh-my-pi](https://github.com/can1357/oh-my-pi)'s hashline engine. Hashline anchors let the LLM target exact lines by content hash rather than fragile line numbers, reducing edit drift and incorrect replacements.
 
@@ -21,11 +21,7 @@ The `read` tool outputs each line with a unique identifier: `LINE#HASH:content`.
 12#BH:}
 ```
 
-### 2. Grep
-The `grep` tool also emits hashline references (`path:>>LINE#HASH:content`), allowing for a seamless Search → Edit workflow.
-By default, `grep` remains disabled unless explicitly enabled via `--tools ...grep...`.
-
-### 3. Edit
+### 2. Edit
 The `edit` tool uses these anchors to perform surgical modifications via a flat `{op, pos, end, lines}` schema:
 
 ```json
