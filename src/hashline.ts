@@ -245,6 +245,70 @@ function shouldAutocorrect(line: string, otherLine: string): boolean {
   }
   return true;
 }
+
+function isEscapedTabAutocorrectEnabled(): boolean {
+  switch (process.env.PI_HASHLINE_AUTOCORRECT_ESCAPED_TABS) {
+    case "0":
+      return false;
+    case "1":
+      return true;
+    default:
+      return true;
+  }
+}
+
+function maybeAutocorrectEscapedTabIndentation(
+  edits: HashlineEdit[],
+  warnings: string[],
+): void {
+  if (!isEscapedTabAutocorrectEnabled()) {
+    return;
+  }
+
+  for (const edit of edits) {
+    if (edit.lines.length === 0) {
+      continue;
+    }
+
+    const hasEscapedTabs = edit.lines.some((line) => line.includes("\\t"));
+    if (!hasEscapedTabs) {
+      continue;
+    }
+
+    const hasRealTabs = edit.lines.some((line) => line.includes("\t"));
+    if (hasRealTabs) {
+      continue;
+    }
+
+    let correctedCount = 0;
+    edit.lines = edit.lines.map((line) =>
+      line.replace(/^((?:\\t)+)/, (escapedTabs) => {
+        correctedCount += escapedTabs.length / 2;
+        return "\t".repeat(escapedTabs.length / 2);
+      }),
+    );
+
+    if (correctedCount > 0) {
+      warnings.push(
+        "Auto-corrected escaped tab indentation in edit: converted leading \\t sequence(s) to real tab characters",
+      );
+    }
+  }
+}
+
+function maybeWarnSuspiciousUnicodeEscapePlaceholder(
+  edits: HashlineEdit[],
+  warnings: string[],
+): void {
+  for (const edit of edits) {
+    if (edit.lines.some((line) => /\\uDDDD/i.test(line))) {
+      warnings.push(
+        "Detected literal \\uDDDD in edit content; no autocorrection applied. Verify whether this should be a real Unicode escape or plain text.",
+      );
+    }
+  }
+}
+
 export function applyHashlineEdits(
   content: string,
   edits: HashlineEdit[],
@@ -317,6 +381,9 @@ export function applyHashlineEdits(
   }
   if (mismatches.length)
     throw new Error(formatMismatchError(mismatches, fileLines));
+
+  maybeAutocorrectEscapedTabIndentation(edits, warnings);
+  maybeWarnSuspiciousUnicodeEscapePlaceholder(edits, warnings);
 
   // Deduplicate identical edits
   const seenEditKeys = new Map<string, number>();
