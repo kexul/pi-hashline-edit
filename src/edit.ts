@@ -43,12 +43,14 @@ const hashlineEditItemSchema = Type.Object(
   { additionalProperties: false },
 );
 
-const hashlineEditToolSchema = Type.Object(
+export const hashlineEditToolSchema = Type.Object(
   {
     path: Type.String({ description: "path" }),
-    edits: Type.Optional(
-      Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
-    ),
+    edits: Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
+    oldText: Type.Optional(Type.String()),
+    newText: Type.Optional(Type.String()),
+    old_text: Type.Optional(Type.String()),
+    new_text: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );

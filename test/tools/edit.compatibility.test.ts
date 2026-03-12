@@ -270,3 +270,44 @@ describe("edit tool compatibility mode", () => {
     });
   });
 });
+
+describe("registered schema accepts legacy payloads", () => {
+  it("legacy oldText/newText passes through execute()", async () => {
+    await withTempFile("sample.txt", "hello world", async ({ cwd, path }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const editTool = getTool("edit");
+
+      // This would fail schema validation if P1 not fixed
+      const result = await editTool.execute(
+        "e1",
+        { path: "sample.txt", oldText: "world", newText: "universe" },
+        undefined,
+        undefined,
+        { cwd, hasUI: true, ui: { notify() {} } } as any,
+      );
+
+      expect(getText(result)).toContain("Updated sample.txt");
+      expect(await readFile(path, "utf-8")).toBe("hello universe");
+    });
+  });
+
+  it("legacy old_text/new_text passes through execute()", async () => {
+    await withTempFile("sample.txt", "hello world", async ({ cwd, path }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const editTool = getTool("edit");
+
+      const result = await editTool.execute(
+        "e1",
+        { path: "sample.txt", old_text: "world", new_text: "universe" },
+        undefined,
+        undefined,
+        { cwd, hasUI: true, ui: { notify() {} } } as any,
+      );
+
+      expect(getText(result)).toContain("Updated sample.txt");
+      expect(await readFile(path, "utf-8")).toBe("hello universe");
+    });
+  });
+});
