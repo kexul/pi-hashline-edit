@@ -49,7 +49,8 @@ describe("registerEditTool", () => {
     expect(registered?.parameters).toBeDefined();
     expect(registered!.parameters.type).toBe("object");
     expect(Object.keys(registered!.parameters.properties)).toEqual(["path", "edits"]);
-    expect(registered!.parameters.required).toEqual(["path"]);
+    expect(registered!.parameters.required).toEqual(["path", "edits"]);
+    expect(registered!.parameters.additionalProperties).toBeUndefined();
     expect(registered!.parameters.properties.edits).toBeDefined();
     expect(registered!.parameters.properties.oldText).toBeUndefined();
     expect(registered!.parameters.properties.newText).toBeUndefined();
