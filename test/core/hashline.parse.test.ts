@@ -73,6 +73,16 @@ describe("stripNewLinePrefixes", () => {
     expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar", "context"]);
   });
 
+  it("strips mixed diff-preview context hashes and additions together", () => {
+    const lines = [" 9#MQ:keep", "+10#VR:new"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new"]);
+  });
+
+  it("strips mixed diff-preview context hashes even when '+' lines are not a majority", () => {
+    const lines = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new", "after"]);
+  });
+
   it("strips mixed +#HASH prefixes in diff-plus mode", () => {
     const lines = ["+#MQ:foo", "+#VR:bar"];
     expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar"]);
@@ -139,6 +149,11 @@ describe("hashlineParseText", () => {
   it("strips hashline prefixes from array input", () => {
     const input = ["1#ZZ:foo", "2#MQ:bar"];
     expect(hashlineParseText(input)).toEqual(["foo", "bar"]);
+  });
+
+  it("strips mixed diff-preview lines from array input", () => {
+    const input = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
+    expect(hashlineParseText(input)).toEqual(["keep", "new", "after"]);
   });
 
   it("returns empty string as a single empty line for blank content", () => {

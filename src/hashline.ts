@@ -57,6 +57,16 @@ const HASHLINE_PREFIX_PLUS_RE =
   /^\+\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
 const DIFF_PLUS_RE = /^\+(?!\+)/;
 
+function stripDiffPreviewPrefix(line: string): string {
+  if (HASHLINE_PREFIX_PLUS_RE.test(line)) {
+    return line.replace(HASHLINE_PREFIX_PLUS_RE, "");
+  }
+  if (HASHLINE_PREFIX_RE.test(line)) {
+    return line.replace(HASHLINE_PREFIX_RE, "");
+  }
+  return line.replace(DIFF_PLUS_RE, "");
+}
+
 /** Lines containing no alphanumeric characters (only punctuation/symbols/whitespace). */
 const RE_SIGNIFICANT = /[\p{L}\p{N}]/u;
 
@@ -179,23 +189,35 @@ function formatMismatchError(
 export function stripNewLinePrefixes(lines: string[]): string[] {
   let hashCount = 0;
   let plusCount = 0;
+  let diffPreviewCount = 0;
   let nonEmpty = 0;
 
   for (const l of lines) {
     if (!l.length) continue;
     nonEmpty++;
-    if (HASHLINE_PREFIX_RE.test(l)) hashCount++;
-    if (DIFF_PLUS_RE.test(l)) plusCount++;
+
+    const isHashLine = HASHLINE_PREFIX_RE.test(l);
+    const isHashPlusLine = HASHLINE_PREFIX_PLUS_RE.test(l);
+    const isPlusLine = DIFF_PLUS_RE.test(l);
+
+    if (isHashLine) hashCount++;
+    if (isHashLine || isHashPlusLine || isPlusLine) diffPreviewCount++;
+    if (isPlusLine) plusCount++;
   }
 
   if (!nonEmpty) return lines;
   const stripHash = hashCount > 0 && hashCount === nonEmpty;
-  const stripPlus = !stripHash && plusCount > 0 && plusCount >= nonEmpty * 0.5;
-  if (!stripHash && !stripPlus) return lines;
+  const stripDiffPreview = !stripHash && plusCount > 0 && diffPreviewCount === nonEmpty;
+  const stripPlus =
+    !stripHash && !stripDiffPreview && plusCount > 0 && plusCount >= nonEmpty * 0.5;
+  if (!stripHash && !stripDiffPreview && !stripPlus) return lines;
 
   return lines.map((line) => {
     if (stripHash) {
       return line.replace(HASHLINE_PREFIX_RE, "");
+    }
+    if (stripDiffPreview) {
+      return stripDiffPreviewPrefix(line);
     }
     if (stripPlus) {
       if (HASHLINE_PREFIX_PLUS_RE.test(line)) {
