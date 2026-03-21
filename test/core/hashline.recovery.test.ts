@@ -296,4 +296,22 @@ describe("integration: resolveEditAnchors → applyHashlineEdits", () => {
     const result = applyHashlineEdits(content, resolved);
     expect(result.content).toBe("aaa\nBBB\nccc");
   });
+
+  it("full pipeline: copied diff-preview replace hunk drops deletion rows", () => {
+    const content = "aaa\nbbb\nccc";
+    const start = `1#${computeLineHash(1, "aaa")}`;
+    const end = `3#${computeLineHash(3, "ccc")}`;
+    const replacement = [
+      ` 1#${computeLineHash(1, "aaa")}:aaa`,
+      "-2    bbb",
+      `+2#${computeLineHash(2, "BBB")}:BBB`,
+      ` 3#${computeLineHash(3, "ccc")}:ccc`,
+    ].join("\n");
+    const toolEdits: HashlineToolEdit[] = [
+      { op: "replace", pos: start, end, lines: replacement },
+    ];
+    const resolved = resolveEditAnchors(toolEdits);
+    const result = applyHashlineEdits(content, resolved);
+    expect(result.content).toBe("aaa\nBBB\nccc");
+  });
 });

@@ -78,6 +78,16 @@ describe("stripNewLinePrefixes", () => {
     expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new"]);
   });
 
+  it("drops diff-preview deletion lines when reusing a replace hunk", () => {
+    const lines = [" 9#MQ:keep", "-10    old", "+10#VR:new", " 11#WS:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new", "after"]);
+  });
+
+  it("drops diff-preview deletion lines even for deletion-only hunks", () => {
+    const lines = [" 9#MQ:keep", "-10    old", " 10#VR:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "after"]);
+  });
+
   it("strips mixed diff-preview context hashes even when '+' lines are not a majority", () => {
     const lines = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
     expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new", "after"]);
@@ -153,6 +163,11 @@ describe("hashlineParseText", () => {
 
   it("strips mixed diff-preview lines from array input", () => {
     const input = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
+    expect(hashlineParseText(input)).toEqual(["keep", "new", "after"]);
+  });
+
+  it("drops deletion rows from diff-preview text input", () => {
+    const input = " 9#MQ:keep\n-10    old\n+10#VR:new\n 11#WS:after";
     expect(hashlineParseText(input)).toEqual(["keep", "new", "after"]);
   });
 

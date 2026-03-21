@@ -56,8 +56,12 @@ const HASHLINE_PREFIX_RE =
 const HASHLINE_PREFIX_PLUS_RE =
   /^\+\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
 const DIFF_PLUS_RE = /^\+(?!\+)/;
+const DIFF_MINUS_RE = /^-\s*\d+\s{4}/;
 
-function stripDiffPreviewPrefix(line: string): string {
+function stripDiffPreviewPrefix(line: string): string | null {
+  if (DIFF_MINUS_RE.test(line)) {
+    return null;
+  }
   if (HASHLINE_PREFIX_PLUS_RE.test(line)) {
     return line.replace(HASHLINE_PREFIX_PLUS_RE, "");
   }
@@ -189,6 +193,7 @@ function formatMismatchError(
 export function stripNewLinePrefixes(lines: string[]): string[] {
   let hashCount = 0;
   let plusCount = 0;
+  let minusCount = 0;
   let diffPreviewCount = 0;
   let nonEmpty = 0;
 
@@ -199,25 +204,34 @@ export function stripNewLinePrefixes(lines: string[]): string[] {
     const isHashLine = HASHLINE_PREFIX_RE.test(l);
     const isHashPlusLine = HASHLINE_PREFIX_PLUS_RE.test(l);
     const isPlusLine = DIFF_PLUS_RE.test(l);
+    const isMinusLine = DIFF_MINUS_RE.test(l);
 
     if (isHashLine) hashCount++;
-    if (isHashLine || isHashPlusLine || isPlusLine) diffPreviewCount++;
+    if (isHashLine || isHashPlusLine || isMinusLine) diffPreviewCount++;
     if (isPlusLine) plusCount++;
+    if (isMinusLine) minusCount++;
   }
 
   if (!nonEmpty) return lines;
   const stripHash = hashCount > 0 && hashCount === nonEmpty;
-  const stripDiffPreview = !stripHash && plusCount > 0 && diffPreviewCount === nonEmpty;
+  const stripDiffPreview =
+    !stripHash && (plusCount > 0 || minusCount > 0) && diffPreviewCount === nonEmpty;
   const stripPlus =
     !stripHash && !stripDiffPreview && plusCount > 0 && plusCount >= nonEmpty * 0.5;
   if (!stripHash && !stripDiffPreview && !stripPlus) return lines;
 
+  if (stripDiffPreview) {
+    const stripped: string[] = [];
+    for (const line of lines) {
+      const normalized = stripDiffPreviewPrefix(line);
+      if (normalized !== null) stripped.push(normalized);
+    }
+    return stripped;
+  }
+
   return lines.map((line) => {
     if (stripHash) {
       return line.replace(HASHLINE_PREFIX_RE, "");
-    }
-    if (stripDiffPreview) {
-      return stripDiffPreviewPrefix(line);
     }
     if (stripPlus) {
       if (HASHLINE_PREFIX_PLUS_RE.test(line)) {
