@@ -24,7 +24,22 @@ describe("parseLineRef", () => {
 
   it("throws on invalid format", () => {
     expect(() => parseLineRef("invalid")).toThrow(/Invalid line reference/);
-    expect(() => parseLineRef("5:AB")).toThrow(/Invalid line reference/);
+  });
+
+  it("diagnoses missing hash", () => {
+    expect(() => parseLineRef("12")).toThrow(/missing hash/i);
+  });
+
+  it("diagnoses wrong separator", () => {
+    expect(() => parseLineRef("5:AB")).toThrow(/wrong separator/i);
+  });
+
+  it("diagnoses invalid hash alphabet", () => {
+    expect(() => parseLineRef("12#ab")).toThrow(/alphabet ZPMQVRWSNKTXJBYH only/i);
+  });
+
+  it("diagnoses invalid hash length", () => {
+    expect(() => parseLineRef("12#ABC")).toThrow(/hash must be exactly 2 characters/i);
   });
 
   it("throws on line 0", () => {
@@ -51,6 +66,21 @@ describe("stripNewLinePrefixes", () => {
   it("strips diff + prefixes at majority threshold", () => {
     const lines = ["+added", "+also added", "context"];
     expect(stripNewLinePrefixes(lines)).toEqual(["added", "also added", "context"]);
+  });
+
+  it("strips mixed +LINE#HASH prefixes in diff-plus mode", () => {
+    const lines = ["+12#MQ:foo", "+ 13#VR:bar", "context"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar", "context"]);
+  });
+
+  it("strips mixed +#HASH prefixes in diff-plus mode", () => {
+    const lines = ["+#MQ:foo", "+#VR:bar"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar"]);
+  });
+
+  it("does NOT strip mixed +LINE#HASH prefixes outside diff-plus mode", () => {
+    const lines = ["+12#MQ:foo", "plain", "other"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["+12#MQ:foo", "plain", "other"]);
   });
 
   it("does NOT strip ++ lines", () => {

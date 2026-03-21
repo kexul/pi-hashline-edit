@@ -1,4 +1,5 @@
 import * as Diff from "diff";
+import { computeLineHash } from "./hashline";
 
 // ─── Line ending normalization ──────────────────────────────────────────
 
@@ -221,6 +222,20 @@ export function replaceText(
 
 // ─── Diff generation ────────────────────────────────────────────────────
 
+function formatDiffPreviewLine(
+  prefix: " " | "+" | "-",
+  lineNum: number,
+  lineNumWidth: number,
+  line: string,
+  includeHash: boolean,
+): string {
+  const paddedLineNum = String(lineNum).padStart(lineNumWidth, " ");
+  if (!includeHash) {
+    return `${prefix}${paddedLineNum}    ${line}`;
+  }
+  return `${prefix}${paddedLineNum}#${computeLineHash(lineNum, line)}:${line}`;
+}
+
 export function generateDiffString(
   oldContent: string,
   newContent: string,
@@ -248,12 +263,12 @@ export function generateDiffString(
       for (const line of raw) {
         if (part.added) {
           output.push(
-            `+${String(newLineNum).padStart(lineNumWidth, " ")} ${line}`,
+            formatDiffPreviewLine("+", newLineNum, lineNumWidth, line, true),
           );
           newLineNum++;
         } else {
           output.push(
-            `-${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`,
+            formatDiffPreviewLine("-", oldLineNum, lineNumWidth, line, false),
           );
           oldLineNum++;
         }
@@ -285,7 +300,7 @@ export function generateDiffString(
       }
       for (const line of linesToShow) {
         output.push(
-          ` ${String(oldLineNum).padStart(lineNumWidth, " ")} ${line}`,
+          formatDiffPreviewLine(" ", newLineNum, lineNumWidth, line, true),
         );
         oldLineNum++;
         newLineNum++;

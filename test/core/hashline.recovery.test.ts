@@ -51,7 +51,7 @@ describe("applyHashlineEdits — error handling", () => {
     expect(() => applyHashlineEdits(content, edits)).toThrow(/2 lines have changed/);
   });
 
-  it("mismatch message does not mention relocation", () => {
+  it("mismatch message includes same-line current anchors without relocation", () => {
     expect(() =>
       applyHashlineEdits("aaa", [
         {
@@ -60,7 +60,7 @@ describe("applyHashlineEdits — error handling", () => {
           lines: ["bbb"],
         } as any,
       ]),
-    ).toThrow(/Use the updated LINE#HASH references/);
+    ).toThrow(/Current anchors:\n1#ZZ -> 1#[A-Z]{2}/);
   });
 });
 

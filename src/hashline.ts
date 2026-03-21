@@ -39,6 +39,10 @@ interface NoopEdit {
  * mistaken for code content, hex literals, or natural language.
  */
 const NIBBLE_STR = "ZPMQVRWSNKTXJBYH";
+const HASH_ALPHABET_RE = new RegExp(`^[${NIBBLE_STR}]+$`);
+const HASHLINE_REF_RE = new RegExp(
+  `^\\s*[>+-]*\\s*(\\d+)\\s*#\\s*([${NIBBLE_STR}]{2})(?:\\s*:.*)?\\s*$`,
+);
 
 const DICT = Array.from({ length: 256 }, (_, i) => {
   const h = i >>> 4;
@@ -49,6 +53,8 @@ const DICT = Array.from({ length: 256 }, (_, i) => {
 /** Pattern matching hashline display format prefixes: `LINE#ID:CONTENT` and `#ID:CONTENT` */
 const HASHLINE_PREFIX_RE =
   /^\s*(?:>>>|>>)?\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
+const HASHLINE_PREFIX_PLUS_RE =
+  /^\+\s*(?:\d+\s*#\s*|#\s*)[ZPMQVRWSNKTXJBYH]{2}:/;
 const DIFF_PLUS_RE = /^\+(?!\+)/;
 
 /** Lines containing no alphanumeric characters (only punctuation/symbols/whitespace). */
@@ -69,19 +75,60 @@ export function computeLineHash(idx: number, line: string): string {
 
 // ─── Parsing ────────────────────────────────────────────────────────────
 
+function diagnoseLineRef(ref: string): string {
+  const trimmed = ref.trim();
+  const core = ref.replace(/^\s*[>+-]*\s*/, "").trim();
+
+  if (!core.length) {
+    return `Invalid line reference "${ref}". Expected "LINE#HASH" (e.g. "5#MQ").`;
+  }
+  if (/^\d+\s*$/.test(core)) {
+    return `Invalid line reference "${ref}": missing hash, use "LINE#HASH" from read output (e.g. "5#MQ").`;
+  }
+  if (/^\d+\s*:/.test(core)) {
+    return `Invalid line reference "${ref}": wrong separator, use "LINE#HASH" instead of "LINE:...".`;
+  }
+
+  const hashMatch = core.match(/^(\d+)\s*#\s*([^\s:]+)(?:\s*:.*)?$/);
+  if (hashMatch) {
+    const line = Number.parseInt(hashMatch[1]!, 10);
+    const hash = hashMatch[2]!;
+    if (line < 1) {
+      return `Line number must be >= 1, got ${line} in "${ref}".`;
+    }
+    if (hash.length !== 2) {
+      return `Invalid line reference "${ref}": hash must be exactly 2 characters from ${NIBBLE_STR}.`;
+    }
+    if (!HASH_ALPHABET_RE.test(hash)) {
+      return `Invalid line reference "${ref}": hash uses invalid characters, hashes use alphabet ${NIBBLE_STR} only.`;
+    }
+  }
+
+  const missingHashMatch = core.match(/^(\d+)\s*#\s*$/);
+  if (missingHashMatch) {
+    return `Invalid line reference "${ref}": missing hash after "#", use "LINE#HASH" from read output.`;
+  }
+
+  if (/^0+\s*#/.test(core)) {
+    return `Line number must be >= 1, got 0 in "${ref}".`;
+  }
+
+  return `Invalid line reference "${trimmed || ref}". Expected "LINE#HASH" (e.g. "5#MQ").`;
+}
+
 export function parseLineRef(ref: string): { line: number; hash: string } {
   // Match LINE#HASH format, tolerating:
   //  - leading ">+" and whitespace (from mismatch/diff display)
   //  - optional trailing display suffix (":..." content)
-  const match = ref.match(/^\s*[>+-]*\s*(\d+)\s*#\s*([ZPMQVRWSNKTXJBYH]{2})/);
-  if (!match)
-    throw new Error(
-      `Invalid line reference "${ref}". Expected "LINE#HASH" (e.g. "5#MQ").`,
-    );
+  const match = ref.match(HASHLINE_REF_RE);
+  if (!match) {
+    throw new Error(diagnoseLineRef(ref));
+  }
   const line = Number.parseInt(match[1], 10);
-  if (line < 1)
+  if (line < 1) {
     throw new Error(`Line number must be >= 1, got ${line} in "${ref}".`);
-  return { line, hash: match[2] };
+  }
+  return { line, hash: match[2]! };
 }
 
 // ─── Mismatch formatting ────────────────────────────────────────────────
@@ -124,6 +171,12 @@ function formatMismatchError(
     );
   }
 
+  const sortedMismatches = [...mismatches].sort((a, b) => a.line - b.line);
+  out.push("", "Current anchors:");
+  for (const mismatch of sortedMismatches) {
+    out.push(`${mismatch.line}#${mismatch.expected} -> ${mismatch.line}#${mismatch.actual}`);
+  }
+
   return out.join("\n");
 }
 
@@ -146,13 +199,18 @@ export function stripNewLinePrefixes(lines: string[]): string[] {
   const stripPlus = !stripHash && plusCount > 0 && plusCount >= nonEmpty * 0.5;
   if (!stripHash && !stripPlus) return lines;
 
-  return lines.map((l) =>
-    stripHash
-      ? l.replace(HASHLINE_PREFIX_RE, "")
-      : stripPlus
-        ? l.replace(DIFF_PLUS_RE, "")
-        : l,
-  );
+  return lines.map((line) => {
+    if (stripHash) {
+      return line.replace(HASHLINE_PREFIX_RE, "");
+    }
+    if (stripPlus) {
+      if (HASHLINE_PREFIX_PLUS_RE.test(line)) {
+        return line.replace(HASHLINE_PREFIX_PLUS_RE, "");
+      }
+      return line.replace(DIFF_PLUS_RE, "");
+    }
+    return line;
+  });
 }
 
 /**
