@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 type SessionState = {
-  activeTurn: number;
   compatibilityCount: number;
 };
 
@@ -24,11 +23,7 @@ export function registerCompatibilityNotifications(pi: ExtensionAPI): void {
 
   pi.on("turn_start", async (_event, ctx) => {
     const sessionKey = getSessionKey(ctx);
-    const previous = sessionStates.get(sessionKey);
-    sessionStates.set(sessionKey, {
-      activeTurn: (previous?.activeTurn ?? 0) + 1,
-      compatibilityCount: 0,
-    });
+    sessionStates.set(sessionKey, { compatibilityCount: 0 });
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -49,11 +44,12 @@ export function registerCompatibilityNotifications(pi: ExtensionAPI): void {
     }
 
     const sessionKey = getSessionKey(ctx);
-    const state = sessionStates.get(sessionKey) ?? { activeTurn: 0, compatibilityCount: 0 };
-    sessionStates.set(sessionKey, {
-      activeTurn: state.activeTurn,
-      compatibilityCount: state.compatibilityCount + 1,
-    });
+    const state = sessionStates.get(sessionKey);
+    if (state) {
+      state.compatibilityCount += 1;
+    } else {
+      sessionStates.set(sessionKey, { compatibilityCount: 1 });
+    }
   });
 
   pi.on("turn_end", async (_event, ctx) => {
