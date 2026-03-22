@@ -21,6 +21,7 @@ import {
   resolveEditAnchors,
   type HashlineToolEdit,
 } from "./hashline";
+import { classifyFileKind } from "./file-kind";
 import { resolveToCwd } from "./path-utils";
 import { throwIfAborted } from "./runtime";
 
@@ -269,6 +270,22 @@ export function registerEditTool(pi: ExtensionAPI): void {
         await fsAccess(absolutePath, constants.R_OK | constants.W_OK);
       } catch {
         throw new Error(`File not found: ${path}`);
+      }
+
+      throwIfAborted(signal);
+      const fileKind = await classifyFileKind(absolutePath);
+      if (fileKind.kind === "directory") {
+        throw new Error(`Path is a directory: ${path}. Use ls to inspect directories.`);
+      }
+      if (fileKind.kind === "image") {
+        throw new Error(
+          `Path is an image file: ${path}. Hashline edit only supports UTF-8 text files.`,
+        );
+      }
+      if (fileKind.kind === "binary") {
+        throw new Error(
+          `Path is a binary file: ${path} (${fileKind.description}). Hashline edit only supports UTF-8 text files.`,
+        );
       }
 
       throwIfAborted(signal);

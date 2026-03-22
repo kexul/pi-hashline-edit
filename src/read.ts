@@ -9,15 +9,10 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { readFileSync } from "fs";
-import {
-  access as fsAccess,
-  open as fsOpen,
-  readFile as fsReadFile,
-  stat as fsStat,
-} from "fs/promises";
+import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
 import { constants } from "fs";
-import { fileTypeFromBuffer } from "file-type";
 import { normalizeToLF, stripBom } from "./edit-diff";
+import { classifyFileKind } from "./file-kind";
 import { computeLineHash } from "./hashline";
 import { resolveToCwd } from "./path-utils";
 import { throwIfAborted } from "./runtime";
@@ -29,29 +24,6 @@ const READ_DESC = readFileSync(
   .replaceAll("{{DEFAULT_MAX_LINES}}", String(DEFAULT_MAX_LINES))
   .replaceAll("{{DEFAULT_MAX_BYTES}}", formatSize(DEFAULT_MAX_BYTES))
   .trim();
-
-const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-const FILE_TYPE_SNIFF_BYTES = 4100;
-
-async function detectSupportedImageMimeType(filePath: string): Promise<string | null> {
-  const fileHandle = await fsOpen(filePath, "r");
-  try {
-    const buffer = Buffer.alloc(FILE_TYPE_SNIFF_BYTES);
-    const { bytesRead } = await fileHandle.read(buffer, 0, FILE_TYPE_SNIFF_BYTES, 0);
-    if (bytesRead === 0) {
-      return null;
-    }
-
-    const fileType = await fileTypeFromBuffer(buffer.subarray(0, bytesRead));
-    if (!fileType || !IMAGE_MIME_TYPES.has(fileType.mime)) {
-      return null;
-    }
-
-    return fileType.mime;
-  } finally {
-    await fileHandle.close();
-  }
-}
 
 function normalizePositiveInteger(
   value: number | undefined,
@@ -168,8 +140,8 @@ export function registerReadTool(pi: ExtensionAPI): void {
       }
 
       throwIfAborted(signal);
-      const pathStat = await fsStat(absolutePath);
-      if (pathStat.isDirectory()) {
+      const fileKind = await classifyFileKind(absolutePath);
+      if (fileKind.kind === "directory") {
         return {
           content: [
             {
@@ -182,9 +154,20 @@ export function registerReadTool(pi: ExtensionAPI): void {
         };
       }
 
-      throwIfAborted(signal);
-      const mimeType = await detectSupportedImageMimeType(absolutePath);
-      if (mimeType) {
+      if (fileKind.kind === "binary") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Path is a binary file: ${rawPath} (${fileKind.description}). Hashline read only supports UTF-8 text files and supported images.`,
+            },
+          ],
+          isError: true,
+          details: {},
+        };
+      }
+
+      if (fileKind.kind === "image") {
         const builtinRead = createReadTool(ctx.cwd);
         return builtinRead.execute(_toolCallId, params, signal, _onUpdate);
       }
