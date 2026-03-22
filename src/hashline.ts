@@ -505,6 +505,30 @@ function throwEditConflict(
   );
 }
 
+function cloneHashlineEdit(edit: HashlineEdit): HashlineEdit {
+  switch (edit.op) {
+    case "replace":
+      return {
+        op: "replace",
+        pos: { ...edit.pos },
+        ...(edit.end ? { end: { ...edit.end } } : {}),
+        lines: [...edit.lines],
+      };
+    case "append":
+      return {
+        op: "append",
+        ...(edit.pos ? { pos: { ...edit.pos } } : {}),
+        lines: [...edit.lines],
+      };
+    case "prepend":
+      return {
+        op: "prepend",
+        ...(edit.pos ? { pos: { ...edit.pos } } : {}),
+        lines: [...edit.lines],
+      };
+  }
+}
+
 function assertNoConflictingEdits(
   edits: HashlineEdit[],
   fileLineCount: number,
@@ -535,6 +559,11 @@ function assertNoConflictingEdits(
       const insertTarget = left.kind === "insert" ? left : right;
       const insertsInsideReplace =
         insertTarget.boundary >= replaceTarget.startLine &&
+        // boundary === endLine is intentionally allowed: append-after-endLine
+        // lands on the trailing boundary, not inside the replaced range. That is
+        // only safe because bottom-up application sorts the boundary insert ahead
+        // of the replace anchored to the same original end line; revisit this if
+        // edit ordering semantics change.
         insertTarget.boundary < replaceTarget.endLine;
       if (insertsInsideReplace) {
         throwEditConflict(
@@ -560,6 +589,7 @@ export function applyHashlineEdits(
   throwIfAborted(signal);
   if (!edits.length) return { content, firstChangedLine: undefined };
 
+  const workingEdits = edits.map(cloneHashlineEdit);
   const fileLines = content.split("\n");
   const origLines = [...fileLines];
   let firstChanged: number | undefined;
@@ -581,7 +611,7 @@ export function applyHashlineEdits(
   }
 
   // Pre-validate: collect all hash mismatches before mutating
-  for (const edit of edits) {
+  for (const edit of workingEdits) {
     throwIfAborted(signal);
     switch (edit.op) {
       case "replace": {
@@ -628,12 +658,11 @@ export function applyHashlineEdits(
   if (mismatches.length)
     throw new Error(formatMismatchError(mismatches, fileLines, retryLines));
 
-  // Deduplicate identical edits
+  // Deduplicate identical edits without mutating caller-owned input.
   const seenEditKeys = new Map<string, number>();
-  const dedupIndices = new Set<number>();
-  for (let i = 0; i < edits.length; i++) {
+  const dedupedEdits: HashlineEdit[] = [];
+  for (const edit of workingEdits) {
     throwIfAborted(signal);
-    const edit = edits[i];
     let lineKey: string;
     switch (edit.op) {
       case "replace":
@@ -660,23 +689,18 @@ export function applyHashlineEdits(
     }
     const dstKey = `${lineKey}:${edit.lines.join("\n")}`;
     if (seenEditKeys.has(dstKey)) {
-      dedupIndices.add(i);
-    } else {
-      seenEditKeys.set(dstKey, i);
+      continue;
     }
-  }
-  if (dedupIndices.size > 0) {
-    for (let i = edits.length - 1; i >= 0; i--) {
-      if (dedupIndices.has(i)) edits.splice(i, 1);
-    }
+    seenEditKeys.set(dstKey, dedupedEdits.length);
+    dedupedEdits.push(edit);
   }
 
-  assertNoConflictingEdits(edits, fileLines.length);
-  maybeAutocorrectEscapedTabIndentation(edits, warnings, fileLines);
-  maybeWarnSuspiciousUnicodeEscapePlaceholder(edits, warnings);
+  assertNoConflictingEdits(dedupedEdits, fileLines.length);
+  maybeAutocorrectEscapedTabIndentation(dedupedEdits, warnings, fileLines);
+  maybeWarnSuspiciousUnicodeEscapePlaceholder(dedupedEdits, warnings);
 
   // Compute sort key (descending) — bottom-up application
-  const annotated = edits.map((edit, idx) => {
+  const annotated = dedupedEdits.map((edit, idx) => {
     let sortLine: number;
     let precedence: number;
     switch (edit.op) {
@@ -840,9 +864,9 @@ export function applyHashlineEdits(
   for (let i = 0; i < Math.min(fileLines.length, origLines.length); i++) {
     if (fileLines[i] !== origLines[i]) diff++;
   }
-  if (diff > edits.length * 4) {
+  if (diff > dedupedEdits.length * 4) {
     warnings.push(
-      `Edit changed ${diff} lines across ${edits.length} operations — verify no unintended reformatting.`,
+      `Edit changed ${diff} lines across ${dedupedEdits.length} operations — verify no unintended reformatting.`,
     );
   }
 

@@ -139,6 +139,11 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+// Intentional overlap with the published TypeBox schema:
+// - pi normally runs AJV validation before execute(), but that can be disabled in
+//   environments without runtime code generation support.
+// - some request rules here are cross-field semantics the current union schema does
+//   not express cleanly, such as rejecting mixed camelCase/snake_case legacy keys.
 export function assertEditRequest(request: unknown): asserts request is EditRequestParams {
   if (!isRecord(request)) {
     throw new Error("Edit request must be an object.");

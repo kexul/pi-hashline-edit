@@ -135,6 +135,36 @@ describe("applyHashlineEdits — multi-edit ordering", () => {
     const result = applyHashlineEdits(content, edits);
     expect(result.content).toBe("aaa\nBBB\nccc");
   });
+
+  it("preserves append-after-range-end because edits apply bottom-up", () => {
+    const content = "aaa\nbbb\nccc\nddd";
+    const edits: HashlineEdit[] = [
+      {
+        op: "replace",
+        pos: makeTag(2, "bbb"),
+        end: makeTag(3, "ccc"),
+        lines: ["BBB", "CCC"],
+      },
+      { op: "append", pos: makeTag(3, "ccc"), lines: ["tail"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    expect(result.content).toBe("aaa\nBBB\nCCC\ntail\nddd");
+  });
+
+  it("does not mutate caller-owned edit arrays while deduplicating", () => {
+    const content = "aaa\nbbb\nccc";
+    const pos = makeTag(2, "bbb");
+    const edits: HashlineEdit[] = [
+      { op: "replace", pos: { ...pos }, lines: ["BBB"] },
+      { op: "replace", pos: { ...pos }, lines: ["BBB"] },
+    ];
+
+    applyHashlineEdits(content, edits);
+
+    expect(edits).toHaveLength(2);
+    expect(edits[0]).toEqual({ op: "replace", pos: { ...pos }, lines: ["BBB"] });
+    expect(edits[1]).toEqual({ op: "replace", pos: { ...pos }, lines: ["BBB"] });
+  });
 });
 
 describe("applyHashlineEdits — noop detection", () => {

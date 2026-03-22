@@ -35,6 +35,22 @@ describe("assertEditRequest", () => {
     ).toThrow(/cannot mix legacy camelCase and snake_case/i);
   });
 
+  it("enforces mixed legacy-key semantics even when the published schema accepts the payload", () => {
+    const ajv = new Ajv({ allErrors: true });
+    const validate = ajv.compile(hashlineEditToolSchema as any);
+    const payload = {
+      path: "a.ts",
+      edits: [{ op: "replace", pos: "1#ZZ", lines: ["x"] }],
+      oldText: "before",
+      new_text: "after",
+    };
+
+    expect(validate(payload)).toBeTrue();
+    expect(() => assertEditRequest(payload as any)).toThrow(
+      /cannot mix legacy camelCase and snake_case/i,
+    );
+  });
+
   it("rejects append with end", () => {
     expect(() =>
       assertEditRequest({
