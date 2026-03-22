@@ -84,7 +84,11 @@ If the first selected line is too large to fit safely within the read budget, `r
 ## Installation
 
 ```bash
-pi install https://github.com/RimuruW/pi-hashline-edit
+# From local path
+pi install /path/to/pi-hashline-edit
+
+# From npm
+pi install npm:pi-hashline-edit
 ```
 
 ## Development

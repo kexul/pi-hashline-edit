@@ -24,7 +24,22 @@ describe("parseLineRef", () => {
 
   it("throws on invalid format", () => {
     expect(() => parseLineRef("invalid")).toThrow(/Invalid line reference/);
-    expect(() => parseLineRef("5:AB")).toThrow(/Invalid line reference/);
+  });
+
+  it("diagnoses missing hash", () => {
+    expect(() => parseLineRef("12")).toThrow(/missing hash/i);
+  });
+
+  it("diagnoses wrong separator", () => {
+    expect(() => parseLineRef("5:AB")).toThrow(/wrong separator/i);
+  });
+
+  it("diagnoses invalid hash alphabet", () => {
+    expect(() => parseLineRef("12#ab")).toThrow(/alphabet ZPMQVRWSNKTXJBYH only/i);
+  });
+
+  it("diagnoses invalid hash length", () => {
+    expect(() => parseLineRef("12#ABC")).toThrow(/hash must be exactly 2 characters/i);
   });
 
   it("throws on line 0", () => {
@@ -51,6 +66,41 @@ describe("stripNewLinePrefixes", () => {
   it("strips diff + prefixes at majority threshold", () => {
     const lines = ["+added", "+also added", "context"];
     expect(stripNewLinePrefixes(lines)).toEqual(["added", "also added", "context"]);
+  });
+
+  it("strips mixed +LINE#HASH prefixes in diff-plus mode", () => {
+    const lines = ["+12#MQ:foo", "+ 13#VR:bar", "context"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar", "context"]);
+  });
+
+  it("strips mixed diff-preview context hashes and additions together", () => {
+    const lines = [" 9#MQ:keep", "+10#VR:new"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new"]);
+  });
+
+  it("drops diff-preview deletion lines when reusing a replace hunk", () => {
+    const lines = [" 9#MQ:keep", "-10    old", "+10#VR:new", " 11#WS:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new", "after"]);
+  });
+
+  it("drops diff-preview deletion lines even for deletion-only hunks", () => {
+    const lines = [" 9#MQ:keep", "-10    old", " 10#VR:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "after"]);
+  });
+
+  it("strips mixed diff-preview context hashes even when '+' lines are not a majority", () => {
+    const lines = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["keep", "new", "after"]);
+  });
+
+  it("strips mixed +#HASH prefixes in diff-plus mode", () => {
+    const lines = ["+#MQ:foo", "+#VR:bar"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["foo", "bar"]);
+  });
+
+  it("does NOT strip mixed +LINE#HASH prefixes outside diff-plus mode", () => {
+    const lines = ["+12#MQ:foo", "plain", "other"];
+    expect(stripNewLinePrefixes(lines)).toEqual(["+12#MQ:foo", "plain", "other"]);
   });
 
   it("does NOT strip ++ lines", () => {
@@ -109,6 +159,16 @@ describe("hashlineParseText", () => {
   it("strips hashline prefixes from array input", () => {
     const input = ["1#ZZ:foo", "2#MQ:bar"];
     expect(hashlineParseText(input)).toEqual(["foo", "bar"]);
+  });
+
+  it("strips mixed diff-preview lines from array input", () => {
+    const input = [" 9#MQ:keep", "+10#VR:new", " 11#WS:after"];
+    expect(hashlineParseText(input)).toEqual(["keep", "new", "after"]);
+  });
+
+  it("drops deletion rows from diff-preview text input", () => {
+    const input = " 9#MQ:keep\n-10    old\n+10#VR:new\n 11#WS:after";
+    expect(hashlineParseText(input)).toEqual(["keep", "new", "after"]);
   });
 
   it("returns empty string as a single empty line for blank content", () => {

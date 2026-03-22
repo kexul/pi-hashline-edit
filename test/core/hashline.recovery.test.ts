@@ -18,7 +18,7 @@ describe("applyHashlineEdits — error handling", () => {
     const edits: HashlineEdit[] = [
       { op: "replace", pos: { line: 2, hash: "XX" }, lines: ["BBB"] },
     ];
-    expect(() => applyHashlineEdits(content, edits)).toThrow(/changed since last read/);
+    expect(() => applyHashlineEdits(content, edits)).toThrow(/1 stale anchor\./);
   });
 
   it("throws on out-of-range line", () => {
@@ -48,10 +48,10 @@ describe("applyHashlineEdits — error handling", () => {
       { op: "replace", pos: { line: 1, hash: "XX" }, lines: ["A"] },
       { op: "replace", pos: { line: 3, hash: "YY" }, lines: ["C"] },
     ];
-    expect(() => applyHashlineEdits(content, edits)).toThrow(/2 lines have changed/);
+    expect(() => applyHashlineEdits(content, edits)).toThrow(/2 stale anchors\./);
   });
 
-  it("mismatch message does not mention relocation", () => {
+  it("mismatch message exposes retryable >>> LINE#HASH snippets", () => {
     expect(() =>
       applyHashlineEdits("aaa", [
         {
@@ -60,7 +60,31 @@ describe("applyHashlineEdits — error handling", () => {
           lines: ["bbb"],
         } as any,
       ]),
-    ).toThrow(/Use the updated LINE#HASH references/);
+    ).toThrow(/>>> 1#[A-Z]{2}:aaa/);
+  });
+
+  it("retains still-valid range endpoints in retry snippets", () => {
+    const content = "aaa\nbbb\nccc\nddd\neee";
+    const validEnd = makeTag(5, "eee");
+
+    try {
+      applyHashlineEdits(content, [
+        {
+          op: "replace",
+          pos: { line: 1, hash: "ZZ" },
+          end: validEnd,
+          lines: ["AAA"],
+        },
+      ]);
+      throw new Error("Expected applyHashlineEdits to throw for stale range anchor.");
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+      expect(error.message).toContain(
+        `>>> ${validEnd.line}#${validEnd.hash}:eee`,
+      );
+    }
   });
 });
 
@@ -291,6 +315,24 @@ describe("integration: resolveEditAnchors → applyHashlineEdits", () => {
     const hash = computeLineHash(2, "BBB");
     const toolEdits: HashlineToolEdit[] = [
       { op: "replace", pos: tag2, lines: `2#${hash}:BBB` },
+    ];
+    const resolved = resolveEditAnchors(toolEdits);
+    const result = applyHashlineEdits(content, resolved);
+    expect(result.content).toBe("aaa\nBBB\nccc");
+  });
+
+  it("full pipeline: copied diff-preview replace hunk drops deletion rows", () => {
+    const content = "aaa\nbbb\nccc";
+    const start = `1#${computeLineHash(1, "aaa")}`;
+    const end = `3#${computeLineHash(3, "ccc")}`;
+    const replacement = [
+      ` 1#${computeLineHash(1, "aaa")}:aaa`,
+      "-2    bbb",
+      `+2#${computeLineHash(2, "BBB")}:BBB`,
+      ` 3#${computeLineHash(3, "ccc")}:ccc`,
+    ].join("\n");
+    const toolEdits: HashlineToolEdit[] = [
+      { op: "replace", pos: start, end, lines: replacement },
     ];
     const resolved = resolveEditAnchors(toolEdits);
     const result = applyHashlineEdits(content, resolved);
