@@ -6,6 +6,7 @@
       "name": "pi-hashline-edit",
       "dependencies": {
         "diff": "^8.0.2",
+        "file-type": "^21.3.0",
         "xxhashjs": "^0.2.2",
       },
       "devDependencies": {
@@ -256,7 +257,7 @@
 
     "@types/node": ["@types/node@25.2.3", "https://registry.npmmirror.com/@types/node/-/node-25.2.3.tgz", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ=="],
 
-    "@types/xxhashjs": ["@types/xxhashjs@0.2.4", "", { "dependencies": { "@types/node": "*" } }, "sha512-E2+ZoJY2JjmVPN0iQM5gJvZkk98O2PYXSi6HrciEk3EKF34+mauEk/HgwTeCz+2r8HXHMKpucrwy4qTT12OPaQ=="],
+    "@types/xxhashjs": ["@types/xxhashjs@0.2.4", "https://registry.npmmirror.com/@types/xxhashjs/-/xxhashjs-0.2.4.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-E2+ZoJY2JjmVPN0iQM5gJvZkk98O2PYXSi6HrciEk3EKF34+mauEk/HgwTeCz+2r8HXHMKpucrwy4qTT12OPaQ=="],
 
     "agent-base": ["agent-base@7.1.4", "https://registry.npmmirror.com/agent-base/-/agent-base-7.1.4.tgz", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
 
