@@ -1,26 +1,28 @@
-![pi-hashline-edit banner](assets/banner.jpeg)
+![pi-hashline-edit](assets/banner.jpeg)
 
 # pi-hashline-edit
 
-A [pi coding agent](https://github.com/mariozechner/pi-coding-agent) extension that overrides the built-in `read` and `edit` tools with strict `LINE#HASH:content` references.
+A [pi-coding-agent](https://github.com/mariozechner/pi-coding-agent) extension that replaces the built-in `read` and `edit` tools with a hash-anchored line-editing workflow.
 
-Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi), but narrowed to fit pi's minimal and reliability-first philosophy: a small surface, explicit integrity checks, and no fallback modes that hide stale context.
+Every line returned by `read` carries a short content hash. Edits reference these hashes instead of raw text, so the tool can detect stale context and reject outdated changes before they reach the file.
 
----
+Inspired by [oh-my-pi](https://github.com/can1357/oh-my-pi).
 
-## What it overrides
+## Installation
 
-- **`read`**: Prefixes every line with `LINE#HASH:` for precise referencing.
-- **`edit`**: Accepts a structured payload using these hash anchors for surgical line modifications.
+```bash
+# From npm
+pi install npm:pi-hashline-edit
 
-This extension intentionally avoids any separate search override workflow to maintain simplicity and reliability.
+# From a local checkout
+pi install /path/to/pi-hashline-edit
+```
 
----
+## How It Works
 
-## How it works
+### `read` — tagged line output
 
-### Read
-`read` returns text files as full tagged lines:
+Text files are returned with a `LINE#HASH:` prefix on every line:
 
 ```text
 10#VR:function hello() {
@@ -28,84 +30,62 @@ This extension intentionally avoids any separate search override workflow to mai
 12#BH:}
 ```
 
-- **`LINE`**: The current 1-indexed line number.
-- **`HASH`**: A 2-character content hash derived from the custom alphabet `ZPMQVRWSNKTXJBYH`.
+- `LINE` — 1-indexed line number.
+- `HASH` — 2-character content hash from the alphabet `ZPMQVRWSNKTXJBYH`.
 
-If the first selected line is too large to fit safely within the read budget, `read` returns an advisory instead of a partial tagged line. This prevents unusable or misleading anchors.
+Images (JPEG, PNG, GIF, WebP) are passed through as attachments. Binary and directory paths are rejected with a descriptive error.
 
-### Edit
-`edit` prefers this strict hashline payload shape:
+### `edit` — hash-anchored modifications
+
+Edits use the `LINE#HASH` anchors from `read` output to target lines precisely:
 
 ```json
 {
   "path": "src/main.ts",
   "edits": [
-    {
-      "op": "replace",
-      "pos": "11#KT",
-      "lines": ["  console.log('hashline');"]
-    }
+    { "op": "replace", "pos": "11#KT", "lines": ["  console.log('hashline');"] }
   ]
 }
 ```
 
-#### Supported Operations:
-
-| Op | Purpose | Parameters |
+| Op | Purpose | Fields |
 |---|---|---|
-| `replace` | Replace one line (`pos`) or an inclusive range (`pos` + `end`). | `pos`, `end` (optional), `lines` |
-| `append` | Insert after `pos`. Omit `pos` for end of file (EOF). | `pos` (optional), `lines` |
-| `prepend` | Insert before `pos`. Omit `pos` for beginning of file (BOF). | `pos` (optional), `lines` |
+| `replace` | Replace one line (`pos`) or an inclusive range (`pos` + `end`). | `pos` required, `end` optional, `lines` |
+| `append` | Insert lines after `pos`. Omit `pos` to append at EOF. | `pos` optional, `lines` |
+| `prepend` | Insert lines before `pos`. Omit `pos` to prepend at BOF. | `pos` optional, `lines` |
 
----
+All edits in a single call validate against the same pre-edit snapshot and apply bottom-up, so line numbers stay consistent across operations.
 
-## Strictness Guarantees
+## Design Decisions
 
-- **Stale Anchors Fail**: Mismatched hashes do not relocate. You must re-read the file and use the updated `LINE#HASH` references from the error snippet.
-- **Preferred Anchored Editing**: The documented path uses hash anchors instead of free-text replacement.
-- **Hidden compatibility path**: When callers send a legacy top-level exact replace payload, the tool adapts it internally only if the match is exact and unique. Compatibility use is surfaced to the interactive UI, not to the model.
-- **Atomic Application**: All edits in a single call validate against the same pre-edit snapshot and apply bottom-up to ensure line integrity.
-- **Whitespace-aware Hashing**: Internal spaces are significant; trailing spaces are ignored during hash computation.
-- **Display Prefix Stripping**: Automatically handles accidental inclusion of display prefixes (like `10#VR:`) copied from `read` output or diffs.
+- **Stale anchors fail.** A hash mismatch means the file has changed since the last `read`. The error includes a snippet with fresh `LINE#HASH` references for retry.
+- **No fallback relocation.** Mismatched anchors are never silently relocated to a "close enough" line. This trades convenience for correctness.
+- **Hidden legacy compatibility.** When a caller sends a top-level `oldText`/`newText` payload (the built-in edit format), the tool attempts an exact unique match. Usage is surfaced to the interactive UI so the operator can see that the model isn't using hashline mode.
+- **Atomic writes.** Files are written via temp-file-then-rename to avoid corruption from interrupted writes. Symlink chains are resolved so the target file is updated in place.
+- **Display prefix stripping.** If the model accidentally pastes `LINE#HASH:` prefixes or diff `+`/`-` markers into replacement content, they are detected and stripped automatically.
 
----
+## Hashing
 
-## Technical Details
+Hashes are computed with [xxhashjs](https://github.com/nicedoc/xxhashjs) (xxHash32), then mapped to a 2-character string from a custom 16-character alphabet.
 
-- **Hashing Engine**: Uses `xxhashjs` for deterministic 32-bit hashes, mapped to a custom 16-character alphabet optimized for readability and uniqueness (`ZPMQVRWSNKTXJBYH`).
-- **Symbol-line Seeding**: Lines with no alphanumeric content (e.g., a single `}`) mix in their line number to the hash seed to reduce collisions on structural markers.
-- **Safety Mechanisms**:
-    - **Atomic Writes**: Writes to a temporary file before renaming to prevent file corruption during interruptions.
-    - **Abort Signaling**: Supports cancellation of long-running or large edit operations via `AbortSignal`.
-    - **Duplicate Correction**: Automatically detects and strips duplicate boundary lines frequently echoed by LLMs during range edits.
+The alphabet (`ZPMQVRWSNKTXJBYH`) excludes hex digits, common vowels, and visually ambiguous letters (D/G/I/L/O), so a reference like `5#MQ` can never be confused with code content, hex literals, or English words.
 
----
-
-## Installation
-
-```bash
-# From local path
-pi install /path/to/pi-hashline-edit
-
-# From npm
-pi install npm:pi-hashline-edit
-```
+Lines that contain no alphanumeric characters (e.g. a lone `}`) use their line number as the hash seed to reduce collisions on structurally identical markers.
 
 ## Development
 
-This project is developed using **Bun**.
+Requires [Bun](https://bun.sh).
 
 ```bash
-# Install dependencies
 bun install
-
-# Run tests
 bun test
 ```
 
+Set `PI_HASHLINE_DEBUG=1` to show an "active" notification at session start.
+
 ## Credits
 
-Special thanks to [can1357](https://github.com/can1357) for the original [oh-my-pi](https://github.com/can1357/oh-my-pi) implementation and the hashline concept.
+Thanks to [can1357](https://github.com/can1357) for the original [oh-my-pi](https://github.com/can1357/oh-my-pi) implementation and the hashline concept.
 
 ## License
 

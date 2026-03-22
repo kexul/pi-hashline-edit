@@ -1,47 +1,48 @@
-Applies precise file edits using `LINE#HASH` tags from `read` output.
+Apply edits to a file using `LINE#HASH` anchors from `read` output.
 
-<workflow>
-1. You **SHOULD** issue a `read` call before editing if you do not already have fresh tagged context for the file.
-2. You **MUST** submit one `edit` call per file with all planned operations.
-3. You **MUST** use the smallest operation per change site.
-</workflow>
+<usage>
+Submit one `edit` call per file. Include all operations for that file in a single call.
 
-<prohibited>
-You **MUST NOT** use this tool for formatting-only edits: reindenting, realigning, brace-style changes, whitespace normalization, or line-length wrapping. If the diff is only whitespace, do not use `edit`.
-</prohibited>
+Use `read` first if you do not have current `LINE#HASH` references for the target file.
+</usage>
 
-<contract>
-Preferred payload shape: `{ path, edits }`
-- `path`: target file path
-- `edits`: array of strict hashline edit operations
-- Use this structured anchored form whenever possible
-</contract>
+<payload>
+```
+{ path, edits: [{ op, pos, end, lines }] }
+```
+
+- `path` — target file path.
+- `edits` — array of edit operations.
+</payload>
 
 <operations>
-Every edit entry has `op` and `lines`.
-- `replace`: replace one line (`pos`) or a range (`pos` + `end`)
-- `append`: insert after `pos`; omit `pos` for end of file
-- `prepend`: insert before `pos`; omit `pos` for beginning of file
+Each entry has an `op` and a `lines` array of replacement content.
 
-`end` is only valid for `replace`.
+- `replace` — replace one line (`pos`) or an inclusive range (`pos` + `end`). `pos` is required.
+- `append` — insert after `pos`. Omit `pos` to append at end of file.
+- `prepend` — insert before `pos`. Omit `pos` to prepend at beginning of file.
 
-Anchors use `"N#ID"` format from fresh `read` output.
-Examples:
-- `{ path: "src/file.ts", edits: [{ op: "replace", pos: "12#MQ", lines: ["const x = 1;"] }] }`
-- `{ path: "src/file.ts", edits: [{ op: "replace", pos: "12#MQ", end: "14#VR", lines: null }] }`
-- `{ path: "src/file.ts", edits: [{ op: "append", pos: "20#NK", lines: ["footer();"] }] }`
-- `{ path: "src/file.ts", edits: [{ op: "prepend", lines: ["// header"] }] }`
+`end` is only valid with `replace`.
+
+Anchor format: `"LINE#HASH"` copied from `read` output (e.g. `"12#MQ"`).
 </operations>
 
-<rules>
-1. `end` is inclusive.
-2. Copy indentation exactly from fresh `read` output.
-3. `lines` must be literal file content; do not include hashline prefixes unless copied accidentally.
-4. Extra keys inside edit items are invalid.
-</rules>
+<examples>
+- Replace one line: `{ op: "replace", pos: "12#MQ", lines: ["const x = 1;"] }`
+- Replace a range: `{ op: "replace", pos: "12#MQ", end: "14#VR", lines: ["merged"] }`
+- Delete a range: `{ op: "replace", pos: "12#MQ", end: "14#VR", lines: [] }`
+- Append after a line: `{ op: "append", pos: "20#NK", lines: ["footer();"] }`
+- Prepend at file start: `{ op: "prepend", lines: ["// header"] }`
+</examples>
 
-<recovery>
-**Tag mismatch (`>>>`)**: retry using the `>>> LINE#HASH:content` lines from the error snippet. If needed, re-read the file and make a smaller edit.
-**Diff preview hashes**: hashes on visible unchanged and added diff lines can help with quick follow-up edits. Re-read if the preview is collapsed, truncated, or the file may have been modified by other processes.
-**No-op (`identical`)**: do not resubmit unchanged content. Re-read and change actual file content.
-</recovery>
+<constraints>
+- Copy indentation exactly from `read` output.
+- `lines` must be literal file content. Do not include `LINE#HASH:` prefixes.
+- Extra keys inside edit entries are rejected.
+- Submitting content identical to the current file is rejected.
+</constraints>
+
+<errors>
+- **Stale anchor** (`>>>`): the file has changed. Use the `>>> LINE#HASH:content` lines from the error snippet to retry.
+- **No-op** (`identical`): your replacement matches existing content. Re-read and supply different content.
+</errors>
