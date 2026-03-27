@@ -408,6 +408,20 @@ describe("integration: resolveEditAnchors → applyHashlineEdits", () => {
     expect(result.warnings?.[0]).toContain("Accepted fuzzy anchor validation");
   });
 
+  it("full pipeline: copied full-line anchor rejects fuzzy textHint when hash is arbitrary", () => {
+    const line = 'he said "hi"';
+    const content = `${line}\nkeep`;
+    const actualHash = computeLineHash(1, line);
+    const arbitraryHash = actualHash === "ZZ" ? "PP" : "ZZ";
+    const staleWithHint = `1#${arbitraryHash}:${line}`;
+    const toolEdits: HashlineToolEdit[] = [
+      { op: "replace", pos: staleWithHint, lines: ["HELLO"] },
+    ];
+    const resolved = resolveEditAnchors(toolEdits);
+
+    expect(() => applyHashlineEdits(content, resolved)).toThrow(/stale anchor/);
+  });
+
   it("full pipeline: copied diff-preview replace hunk drops deletion rows", () => {
     const content = "aaa\nbbb\nccc";
     const start = `1#${computeLineHash(1, "aaa")}`;

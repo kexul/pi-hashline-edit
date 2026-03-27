@@ -653,15 +653,18 @@ export function applyHashlineEdits(
     const line = fileLines[ref.line - 1];
     const actual = computeLineHash(ref.line, line);
     if (actual === ref.hash) return true;
-    if (ref.textHint !== undefined && isFuzzyEquivalentLine(ref.textHint, line)) {
-      const key = `${ref.line}:${ref.hash}:${ref.textHint}`;
-      if (!acceptedFuzzyRefs.has(key)) {
-        acceptedFuzzyRefs.add(key);
-        warnings.push(
-          `Accepted fuzzy anchor validation at line ${ref.line}: exact hash mismatched, but the copied line content still matched after whitespace/Unicode normalization.`,
-        );
+    if (ref.textHint !== undefined) {
+      const hintedHash = computeLineHash(ref.line, ref.textHint);
+      if (hintedHash === ref.hash && isFuzzyEquivalentLine(ref.textHint, line)) {
+        const key = `${ref.line}:${ref.hash}:${ref.textHint}`;
+        if (!acceptedFuzzyRefs.has(key)) {
+          acceptedFuzzyRefs.add(key);
+          warnings.push(
+            `Accepted fuzzy anchor validation at line ${ref.line}: exact hash mismatched, but the copied line content still matched after whitespace/Unicode normalization.`,
+          );
+        }
+        return true;
       }
-      return true;
     }
     mismatches.push({ line: ref.line, expected: ref.hash, actual });
     retryLines.add(ref.line);
