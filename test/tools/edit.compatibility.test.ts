@@ -323,7 +323,7 @@ describe("edit tool compatibility mode", () => {
   });
 });
 
-describe("registered schema accepts legacy payloads", () => {
+describe("execute accepts legacy payloads via hidden compatibility path", () => {
   it("legacy oldText/newText passes through execute()", async () => {
     await withTempFile("sample.txt", "hello world", async ({ cwd, path }) => {
       const { pi, getTool } = makeFakePiRegistry();

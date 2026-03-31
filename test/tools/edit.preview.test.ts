@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { chmod } from "fs/promises";
 import { computeEditPreview } from "../../src/edit";
 import { computeLineHash } from "../../src/hashline";
 import { withTempFile } from "../support/fixtures";
@@ -40,6 +41,31 @@ describe("computeEditPreview", () => {
         return;
       }
       expect(preview.diff).toContain("HELLO");
+    });
+  });
+
+  it("still computes a preview diff for read-only files", async () => {
+    await withTempFile("sample.txt", "aaa\nbbb\nccc\n", async ({ cwd, path }) => {
+      await chmod(path, 0o444);
+      const betaRef = `2#${computeLineHash(2, "bbb")}:bbb`;
+
+      try {
+        const preview = await computeEditPreview(
+          {
+            path: "sample.txt",
+            edits: [{ op: "replace", pos: betaRef, lines: ["BBB"] }],
+          },
+          cwd,
+        );
+
+        expect("diff" in preview).toBeTrue();
+        if (!("diff" in preview)) {
+          return;
+        }
+        expect(preview.diff).toContain(":BBB");
+      } finally {
+        await chmod(path, 0o644);
+      }
     });
   });
 });
