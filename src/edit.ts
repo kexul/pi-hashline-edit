@@ -1,3 +1,4 @@
+import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import type { EditToolDetails, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -17,7 +18,7 @@ import {
   extractLegacyTopLevelReplace,
 } from "./edit-compat";
 import { writeFileAtomically } from "./fs-write";
-import { withFileMutationQueue } from "./file-mutation-queue";
+import { withPiFileMutationQueue } from "./pi-file-mutation-queue";
 import {
   applyHashlineEdits,
   resolveEditAnchors,
@@ -33,39 +34,17 @@ const hashlineEditLinesSchema = Type.Union([
   Type.Null(),
 ]);
 
-const replaceEditItemSchema = Type.Object(
+const hashlineEditItemSchema = Type.Object(
   {
-    op: Type.Literal("replace"),
-    pos: Type.String({ description: "anchor" }),
+    op: StringEnum(["replace", "append", "prepend"] as const, {
+      description: 'edit operation: "replace", "append", or "prepend"',
+    }),
+    pos: Type.Optional(Type.String({ description: "anchor" })),
     end: Type.Optional(Type.String({ description: "limit position" })),
     lines: hashlineEditLinesSchema,
   },
   { additionalProperties: false },
 );
-
-const appendEditItemSchema = Type.Object(
-  {
-    op: Type.Literal("append"),
-    pos: Type.Optional(Type.String({ description: "anchor" })),
-    lines: hashlineEditLinesSchema,
-  },
-  { additionalProperties: false },
-);
-
-const prependEditItemSchema = Type.Object(
-  {
-    op: Type.Literal("prepend"),
-    pos: Type.Optional(Type.String({ description: "anchor" })),
-    lines: hashlineEditLinesSchema,
-  },
-  { additionalProperties: false },
-);
-
-const hashlineEditItemSchema = Type.Union([
-  replaceEditItemSchema,
-  appendEditItemSchema,
-  prependEditItemSchema,
-]);
 
 export const hashlineEditToolSchema = Type.Object(
   {
@@ -73,10 +52,6 @@ export const hashlineEditToolSchema = Type.Object(
     edits: Type.Optional(
       Type.Array(hashlineEditItemSchema, { description: "edits over $path" }),
     ),
-    oldText: Type.Optional(Type.String()),
-    newText: Type.Optional(Type.String()),
-    old_text: Type.Optional(Type.String()),
-    new_text: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );
@@ -130,6 +105,58 @@ function hasOwn(request: Record<string, unknown>, key: string): boolean {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function withHiddenStringProperty(
+  target: Record<string, unknown>,
+  key: typeof LEGACY_KEYS[number],
+  value: string,
+): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/**
+ * Normalise raw tool-call arguments before validation and execution.
+ *
+ * In newer pi runtimes this is registered as `prepareArguments` so it runs
+ * before schema validation, letting old-session payloads with top-level
+ * `oldText/newText` continue to work without exposing those fields in the
+ * public tool schema.
+ *
+ * The legacy fields are stored as non-enumerable properties so they pass
+ * through `Object.keys()` and `JSON.stringify()` silently while still being
+ * accessible to `assertEditRequest` and `extractLegacyTopLevelReplace`.
+ */
+export function prepareEditArguments(args: unknown): unknown {
+  if (!isRecord(args)) {
+    return args;
+  }
+
+  const hasAnyLegacyKey = LEGACY_KEYS.some((key) => hasOwn(args, key));
+  if (!hasAnyLegacyKey) {
+    return args;
+  }
+
+  const prepared: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (!LEGACY_KEYS.includes(key as typeof LEGACY_KEYS[number])) {
+      prepared[key] = value;
+    }
+  }
+
+  for (const legacyKey of LEGACY_KEYS) {
+    const value = args[legacyKey];
+    if (typeof value === "string") {
+      withHiddenStringProperty(prepared, legacyKey, value);
+    }
+  }
+
+  return prepared;
 }
 
 // Intentional overlap with the published TypeBox schema:
@@ -333,14 +360,15 @@ function formatEditCall(
 export async function computeEditPreview(
   request: unknown,
   cwd: string,
-  ): Promise<EditPreview> {
+): Promise<EditPreview> {
+  const preparedRequest = prepareEditArguments(request);
   try {
-    assertEditRequest(request);
+    assertEditRequest(preparedRequest);
   } catch (error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
 
-  const params = request as EditRequestParams;
+  const params = preparedRequest as EditRequestParams;
   const path = params.path;
   const absolutePath = resolveToCwd(path, cwd);
   const toolEdits = Array.isArray(params.edits) ? params.edits : [];
@@ -351,9 +379,16 @@ export async function computeEditPreview(
   }
 
   try {
-    await fsAccess(absolutePath, constants.R_OK | constants.W_OK);
-  } catch {
-    return { error: `File not found: ${path}` };
+    await fsAccess(absolutePath, constants.R_OK);
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return { error: `File not found: ${path}` };
+    }
+    if (code === "EACCES" || code === "EPERM") {
+      return { error: `File is not readable: ${path}` };
+    }
+    return { error: `Cannot access file: ${path}` };
   }
 
   try {
@@ -397,15 +432,15 @@ export async function computeEditPreview(
   } catch (error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-
 }
 
 export function registerEditTool(pi: ExtensionAPI): void {
-  pi.registerTool({
+  const toolDefinition = {
     name: "edit",
     label: "Edit",
     description: EDIT_DESC,
     parameters: hashlineEditToolSchema,
+    prepareArguments: prepareEditArguments,
     promptSnippet: EDIT_PROMPT_SNIPPET,
     promptGuidelines: EDIT_PROMPT_GUIDELINES,
     renderCall(args, theme, context) {
@@ -440,14 +475,18 @@ export function registerEditTool(pi: ExtensionAPI): void {
     },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      assertEditRequest(params);
+      const preparedParams = prepareEditArguments(params);
+      assertEditRequest(preparedParams);
 
-      const path = params.path;
+      const normalizedParams = preparedParams as EditRequestParams;
+      const path = normalizedParams.path;
       const absolutePath = resolveToCwd(path, ctx.cwd);
-      const toolEdits = Array.isArray(params.edits)
-        ? (params.edits as HashlineToolEdit[])
+      const toolEdits = Array.isArray(normalizedParams.edits)
+        ? (normalizedParams.edits as HashlineToolEdit[])
         : [];
-      const legacy = extractLegacyTopLevelReplace(params as Record<string, unknown>);
+      const legacy = extractLegacyTopLevelReplace(
+        normalizedParams as Record<string, unknown>,
+      );
 
       if (toolEdits.length === 0 && !legacy) {
         return {
@@ -457,12 +496,19 @@ export function registerEditTool(pi: ExtensionAPI): void {
         };
       }
 
-      return withFileMutationQueue(absolutePath, async () => {
+      return withPiFileMutationQueue(absolutePath, async () => {
         throwIfAborted(signal);
         try {
           await fsAccess(absolutePath, constants.R_OK | constants.W_OK);
-        } catch {
-          throw new Error(`File not found: ${path}`);
+        } catch (error: unknown) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") {
+            throw new Error(`File not found: ${path}`);
+          }
+          if (code === "EACCES" || code === "EPERM") {
+            throw new Error(`File is not writable: ${path}`);
+          }
+          throw new Error(`Cannot access file: ${path}`);
         }
 
         throwIfAborted(signal);
@@ -509,9 +555,6 @@ export function registerEditTool(pi: ExtensionAPI): void {
           noopEdits = anchorResult.noopEdits;
           firstChangedLine = anchorResult.firstChangedLine;
         } else {
-          // Normalize legacy payload to LF before replacement so CRLF callers still
-          // match normalized file content, and so restoreLineEndings does not produce
-          // \r\r\n corruption on inserted multiline text.
           const normalizedOldText = normalizeToLF(legacy!.oldText);
           const normalizedNewText = normalizeToLF(legacy!.newText);
           const replaced = applyExactUniqueLegacyReplace(
@@ -575,5 +618,9 @@ export function registerEditTool(pi: ExtensionAPI): void {
         };
       });
     },
-  });
+  };
+
+  // prepareArguments exists in newer pi runtimes; older local type defs used in this
+  // repository's tests do not declare it yet, but runtime registration is compatible.
+  pi.registerTool(toolDefinition as any);
 }
