@@ -156,9 +156,20 @@ export function prepareEditArguments(args: unknown): unknown {
   }
 
   for (const legacyKey of LEGACY_KEYS) {
+    if (!hasOwn(args, legacyKey)) continue;
     const value = args[legacyKey];
     if (typeof value === "string") {
       withHiddenStringProperty(prepared, legacyKey, value);
+    } else {
+      // Preserve non-string legacy values as non-enumerable so
+      // assertEditRequest can reject them with a clear type error
+      // instead of silently dropping them.
+      Object.defineProperty(prepared, legacyKey, {
+        value,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
     }
   }
 

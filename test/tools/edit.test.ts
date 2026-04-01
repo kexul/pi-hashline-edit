@@ -73,6 +73,17 @@ describe("assertEditRequest", () => {
       } as any),
     ).toThrow(/requires a "pos" anchor string/i);
   });
+
+  it("rejects non-string legacy key values after prepareEditArguments normalization", () => {
+    const prepared = prepareEditArguments({
+      path: "a.ts",
+      edits: [{ op: "replace", pos: "1#ZZ", lines: ["x"] }],
+      oldText: 123,
+    });
+    expect(() => assertEditRequest(prepared)).toThrow(
+      /must be a string/i,
+    );
+  });
 });
 
 describe("registerEditTool", () => {
