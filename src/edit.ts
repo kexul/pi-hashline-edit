@@ -1,6 +1,7 @@
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
-import type { EditToolDetails, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { constants } from "fs";
 import { readFileSync } from "fs";
@@ -18,7 +19,6 @@ import {
   extractLegacyTopLevelReplace,
 } from "./edit-compat";
 import { writeFileAtomically } from "./fs-write";
-import { withPiFileMutationQueue } from "./pi-file-mutation-queue";
 import {
   applyHashlineEdits,
   resolveEditAnchors,
@@ -70,6 +70,12 @@ type CompatibilityDetails = {
   strategy: "legacy-top-level-replace";
   matchCount: 1;
   fuzzyMatch?: true;
+};
+
+type HashlineEditToolDetails = {
+  diff: string;
+  firstChangedLine?: number;
+  compatibility?: CompatibilityDetails;
 };
 
 const EDIT_DESC = readFileSync(
@@ -435,7 +441,11 @@ export async function computeEditPreview(
 }
 
 export function registerEditTool(pi: ExtensionAPI): void {
-  const toolDefinition = {
+  const toolDefinition: ToolDefinition<
+    typeof hashlineEditToolSchema,
+    HashlineEditToolDetails,
+    EditRenderState
+  > = {
     name: "edit",
     label: "Edit",
     description: EDIT_DESC,
@@ -452,6 +462,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
         const argsKey = JSON.stringify(previewInput);
         if (context.state.argsKey !== argsKey) {
           context.state.argsKey = argsKey;
+          context.state.preview = undefined;
           computeEditPreview(previewInput, context.cwd)
             .then((preview) => {
               if (context.state.argsKey === argsKey) {
@@ -459,7 +470,14 @@ export function registerEditTool(pi: ExtensionAPI): void {
                 context.invalidate();
               }
             })
-            .catch(() => {});
+            .catch((err: unknown) => {
+              if (context.state.argsKey === argsKey) {
+                context.state.preview = {
+                  error: err instanceof Error ? err.message : String(err),
+                };
+                context.invalidate();
+              }
+            });
         }
       }
       const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -492,11 +510,11 @@ export function registerEditTool(pi: ExtensionAPI): void {
         return {
           content: [{ type: "text", text: "No edits provided." }],
           isError: true,
-          details: { diff: "", firstChangedLine: undefined } as EditToolDetails,
+          details: { diff: "", firstChangedLine: undefined },
         };
       }
 
-      return withPiFileMutationQueue(absolutePath, async () => {
+      return withFileMutationQueue(absolutePath, async () => {
         throwIfAborted(signal);
         try {
           await fsAccess(absolutePath, constants.R_OK | constants.W_OK);
@@ -614,13 +632,11 @@ export function registerEditTool(pi: ExtensionAPI): void {
             diff: diffResult.diff,
             firstChangedLine: firstChangedLine ?? diffResult.firstChangedLine,
             ...(compatibilityDetails ? { compatibility: compatibilityDetails } : {}),
-          } as EditToolDetails,
+          },
         };
       });
     },
   };
 
-  // prepareArguments exists in newer pi runtimes; older local type defs used in this
-  // repository's tests do not declare it yet, but runtime registration is compatible.
-  pi.registerTool(toolDefinition as any);
+  pi.registerTool(toolDefinition);
 }
