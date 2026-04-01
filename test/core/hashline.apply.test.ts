@@ -216,3 +216,15 @@ describe("applyHashlineEdits — noop detection", () => {
     expect(() => applyHashlineEdits(content, edits)).toThrow(/empty lines payload/);
   });
 });
+
+describe("applyHashlineEdits — warning heuristics", () => {
+  it("does not warn when a single prepend only shifts existing lines", () => {
+    const content = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`).join("\n");
+    const edits: HashlineEdit[] = [{ op: "prepend", lines: ["HEADER"] }];
+
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.content.startsWith("HEADER\nline 1\nline 2")).toBeTrue();
+    expect(result.warnings).toBeUndefined();
+  });
+});

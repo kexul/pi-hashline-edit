@@ -925,15 +925,6 @@ export function applyHashlineEdits(
     }
   }
 
-  let diff = Math.abs(fileLines.length - origLines.length);
-  for (let i = 0; i < Math.min(fileLines.length, origLines.length); i++) {
-    if (fileLines[i] !== origLines[i]) diff++;
-  }
-  if (diff > dedupedEdits.length * 4) {
-    warnings.push(
-      `Edit changed ${diff} lines across ${dedupedEdits.length} operations — verify no unintended reformatting.`,
-    );
-  }
 
   return {
     content: fileLines.join("\n"),
