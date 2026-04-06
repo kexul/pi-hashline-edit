@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import register from "../../index";
-import { formatHashlineReadPreview, formatHashlineRegion } from "../../src/read";
+import { formatHashlineRegion } from "../../src/hashline";
+import { formatHashlineReadPreview } from "../../src/read";
 import { computeLineHash } from "../../src/hashline";
 import { makeFakePiRegistry, withTempFile } from "../support/fixtures";
 

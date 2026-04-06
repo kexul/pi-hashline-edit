@@ -1,5 +1,11 @@
 import * as Diff from "diff";
-import { computeLineHash, FUZZY_SINGLE_QUOTES_RE, FUZZY_DOUBLE_QUOTES_RE, FUZZY_HYPHENS_RE, FUZZY_UNICODE_SPACES_RE } from "./hashline";
+import {
+  computeLineHash,
+  FUZZY_HYPHENS_RE,
+  FUZZY_DOUBLE_QUOTES_RE,
+  FUZZY_SINGLE_QUOTES_RE,
+  FUZZY_UNICODE_SPACES_RE,
+} from "./hashline";
 
 // ─── Line ending normalization ──────────────────────────────────────────
 

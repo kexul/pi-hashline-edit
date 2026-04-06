@@ -1006,7 +1006,6 @@ export function applyHashlineEdits(
     }
   }
 
-
   return {
     content: fileLines.join("\n"),
     firstChangedLine: firstChanged,
@@ -1064,4 +1063,62 @@ export function computeAffectedLineRange(params: {
   }
 
   return { start, end };
+}
+
+export function formatHashlineRegion(
+  lines: string[],
+  startLine: number,
+): string {
+  return lines
+    .map((line, index) => {
+      const lineNumber = startLine + index;
+      return `${lineNumber}#${computeLineHash(lineNumber, line)}:${line}`;
+    })
+    .join("\n");
+}
+
+// ─── Legacy edit line range computation ─────────────────────────────
+
+/**
+ * Compute first/last changed line numbers for legacy (oldText/newText) edits.
+ * Uses character-level diff to locate the changed span, then maps to line
+ * numbers in the result document so downstream anchor chaining works.
+ */
+export function computeLegacyEditLineRange(
+  original: string,
+  result: string,
+): { firstChangedLine: number; lastChangedLine: number } | null {
+  if (original === result) return null;
+
+  let firstDiff = 0;
+  const minLen = Math.min(original.length, result.length);
+  while (firstDiff < minLen && original[firstDiff] === result[firstDiff]) {
+    firstDiff++;
+  }
+  if (firstDiff === minLen && original.length === result.length) return null;
+
+  let lastOrig = original.length - 1;
+  let lastRes = result.length - 1;
+  while (
+    lastOrig >= firstDiff &&
+    lastRes >= firstDiff &&
+    original[lastOrig] === result[lastRes]
+  ) {
+    lastOrig--;
+    lastRes--;
+  }
+
+  // Map the last-changed character index in the result to a 1-based line number.
+  function indexToLine(charIdx: number, text: string): number {
+    let line = 1;
+    for (let i = 0; i < charIdx && i < text.length; i++) {
+      if (text[i] === "\n") line++;
+    }
+    return line;
+  }
+
+  const firstChangedLine = indexToLine(firstDiff, result);
+  const lastChangedLine = indexToLine(lastRes, result);
+
+  return { firstChangedLine, lastChangedLine };
 }

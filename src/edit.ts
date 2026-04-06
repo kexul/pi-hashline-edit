@@ -22,12 +22,13 @@ import { writeFileAtomically } from "./fs-write";
 import {
   applyHashlineEdits,
   computeAffectedLineRange,
+  computeLegacyEditLineRange,
+  formatHashlineRegion,
   resolveEditAnchors,
   type HashlineToolEdit,
 } from "./hashline";
 import { classifyFileKind } from "./file-kind";
 import { resolveToCwd } from "./path-utils";
-import { formatHashlineRegion } from "./read";
 import { throwIfAborted } from "./runtime";
 
 const hashlineEditLinesSchema = Type.Union([
@@ -591,6 +592,12 @@ export function registerEditTool(pi: ExtensionAPI): void {
             matchCount: replaced.matchCount,
             ...(replaced.usedFuzzyMatch ? { fuzzyMatch: true } : {}),
           };
+          const legacyRange = computeLegacyEditLineRange(
+            originalNormalized,
+            result,
+          );
+          firstChangedLine = legacyRange?.firstChangedLine;
+          lastChangedLine = legacyRange?.lastChangedLine;
         }
 
         if (originalNormalized === result) {

@@ -13,7 +13,7 @@ import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
 import { constants } from "fs";
 import { normalizeToLF, stripBom } from "./edit-diff";
 import { classifyFileKind } from "./file-kind";
-import { computeLineHash } from "./hashline";
+import { computeLineHash, formatHashlineRegion } from "./hashline";
 import { resolveToCwd } from "./path-utils";
 import { throwIfAborted } from "./runtime";
 
@@ -61,18 +61,6 @@ function getPreviewLines(text: string): string[] {
 
   const lines = text.split("\n");
   return text.endsWith("\n") ? lines.slice(0, -1) : lines;
-}
-
-export function formatHashlineRegion(
-  lines: string[],
-  startLine: number,
-): string {
-  return lines
-    .map((line, index) => {
-      const lineNumber = startLine + index;
-      return `${lineNumber}#${computeLineHash(lineNumber, line)}:${line}`;
-    })
-    .join("\n");
 }
 
 export function formatHashlineReadPreview(
@@ -172,7 +160,9 @@ export function registerReadTool(pi: ExtensionAPI): void {
       try {
         await fsAccess(absolutePath, constants.R_OK);
       } catch (error: unknown) {
-        const code = (error as NodeJS.ErrnoException).code;
+        const code = error instanceof Error
+          ? (error as NodeJS.ErrnoException).code
+          : undefined;
         if (code === "ENOENT") {
           throw new Error(`File not found: ${rawPath}`);
         }
