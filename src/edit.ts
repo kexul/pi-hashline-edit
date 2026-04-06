@@ -21,6 +21,9 @@ import {
 import { writeFileAtomically } from "./fs-write";
 import {
   applyHashlineEdits,
+  computeAffectedLineRange,
+  computeLegacyEditLineRange,
+  formatHashlineRegion,
   resolveEditAnchors,
   type HashlineToolEdit,
 } from "./hashline";
@@ -87,15 +90,6 @@ const EDIT_PROMPT_SNIPPET = readFileSync(
   new URL("../prompts/edit-snippet.md", import.meta.url),
   "utf-8",
 ).trim();
-
-const EDIT_PROMPT_GUIDELINES = readFileSync(
-  new URL("../prompts/edit-guidelines.md", import.meta.url),
-  "utf-8",
-)
-  .split("\n")
-  .map((line) => line.trim())
-  .filter((line) => line.startsWith("- "))
-  .map((line) => line.slice(2));
 
 const ROOT_KEYS = new Set(["path", "edits", "oldText", "newText", "old_text", "new_text"]);
 const ITEM_KEYS = new Set(["op", "pos", "end", "lines"]);
@@ -463,7 +457,6 @@ export function registerEditTool(pi: ExtensionAPI): void {
     parameters: hashlineEditToolSchema,
     prepareArguments: prepareEditArguments,
     promptSnippet: EDIT_PROMPT_SNIPPET,
-    promptGuidelines: EDIT_PROMPT_GUIDELINES,
     renderCall(args, theme, context) {
       const previewInput = getRenderablePreviewInput(args);
       if (!context.argsComplete || !previewInput) {
@@ -504,10 +497,11 @@ export function registerEditTool(pi: ExtensionAPI): void {
     },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const preparedParams = prepareEditArguments(params);
-      assertEditRequest(preparedParams);
+      // `params` may already be the object returned by `prepareArguments`, which
+      // preserves legacy top-level replace fields as hidden properties for execute.
+      assertEditRequest(params);
 
-      const normalizedParams = preparedParams as EditRequestParams;
+      const normalizedParams = params as EditRequestParams;
       const path = normalizedParams.path;
       const absolutePath = resolveToCwd(path, ctx.cwd);
       const toolEdits = Array.isArray(normalizedParams.edits)
@@ -574,6 +568,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
             }>
           | undefined;
         let firstChangedLine: number | undefined;
+        let lastChangedLine: number | undefined;
         let compatibilityDetails: CompatibilityDetails | undefined;
 
         if (toolEdits.length > 0) {
@@ -583,6 +578,7 @@ export function registerEditTool(pi: ExtensionAPI): void {
           warnings = anchorResult.warnings;
           noopEdits = anchorResult.noopEdits;
           firstChangedLine = anchorResult.firstChangedLine;
+          lastChangedLine = anchorResult.lastChangedLine;
         } else {
           const normalizedOldText = normalizeToLF(legacy!.oldText);
           const normalizedNewText = normalizeToLF(legacy!.newText);
@@ -598,6 +594,12 @@ export function registerEditTool(pi: ExtensionAPI): void {
             matchCount: replaced.matchCount,
             ...(replaced.usedFuzzyMatch ? { fuzzyMatch: true } : {}),
           };
+          const legacyRange = computeLegacyEditLineRange(
+            originalNormalized,
+            result,
+          );
+          firstChangedLine = legacyRange?.firstChangedLine;
+          lastChangedLine = legacyRange?.lastChangedLine;
         }
 
         if (originalNormalized === result) {
@@ -632,11 +634,32 @@ export function registerEditTool(pi: ExtensionAPI): void {
         const warningsBlock = warnings?.length
           ? `\n\nWarnings:\n${warnings.join("\n")}`
           : "";
+
+        // Compute updated anchors for chaining edits without re-reading.
+        // Reuse read tool semantics: empty string → 0 lines, trailing newline sentinel stripped.
+        const resultLines = result.length === 0
+          ? []
+          : result.endsWith("\n")
+            ? result.split("\n").slice(0, -1)
+            : result.split("\n");
+        const anchorRange = computeAffectedLineRange({
+          firstChangedLine,
+          lastChangedLine,
+          resultLineCount: resultLines.length,
+        });
+        const anchorsBlock = anchorRange
+          ? (() => {
+              const region = resultLines.slice(anchorRange.start - 1, anchorRange.end);
+              const formatted = formatHashlineRegion(region, anchorRange.start);
+              return `\n\n--- Updated anchors (lines ${anchorRange.start}-${anchorRange.end}; use these for subsequent edits in this region, or read for distant edits) ---\n${formatted}`;
+            })()
+          : "";
+
         return {
           content: [
             {
               type: "text",
-              text: `Updated ${path}\n${summaryLine}${previewBlock}${warningsBlock}`,
+              text: `Updated ${path}\n${summaryLine}${previewBlock}${warningsBlock}${anchorsBlock}`,
             },
           ],
           details: {

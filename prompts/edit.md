@@ -27,12 +27,22 @@ Each entry has an `op` and a `lines` array of replacement content.
 Anchor format: `"LINE#HASH"` copied from `read` output (e.g. `"12#MQ"`).
 </operations>
 
+<chained-edits>
+After a successful edit, the tool returns an "Updated anchors" block with fresh
+`LINE#HASH` references for the changed region. You may use these anchors directly
+in your next edit call on the same file without calling `read` again, provided
+your next edit targets the same region or nearby lines.
+
+If your next edit targets a distant part of the file, use `read` first to get
+fresh anchors for that region.
+</chained-edits>
+
 <examples>
-- Replace one line: `{ op: "replace", pos: "12#MQ", lines: ["const x = 1;"] }`
-- Replace a range: `{ op: "replace", pos: "12#MQ", end: "14#VR", lines: ["merged"] }`
-- Delete a range: `{ op: "replace", pos: "12#MQ", end: "14#VR", lines: [] }`
-- Append after a line: `{ op: "append", pos: "20#NK", lines: ["footer();"] }`
-- Prepend at file start: `{ op: "prepend", lines: ["// header"] }`
+- replace one line: `{op:"replace",pos:"12#MQ",lines:["const x = 1;"]}`
+- replace range: `{op:"replace",pos:"12#MQ",end:"14#VR",lines:["merged"]}`
+- delete range: `{op:"replace",pos:"12#MQ",end:"14#VR",lines:[]}`
+- append after line: `{op:"append",pos:"20#NK",lines:["footer();"]}`
+- prepend at BOF: `{op:"prepend",lines:["// header"]}`
 </examples>
 
 <constraints>
@@ -40,6 +50,8 @@ Anchor format: `"LINE#HASH"` copied from `read` output (e.g. `"12#MQ"`).
 - `lines` must be literal file content. Do not include `LINE#HASH:` prefixes.
 - Extra keys inside edit entries are rejected.
 - Submitting content identical to the current file is rejected.
+- Each edit targets anchors from the same pre-edit snapshot. Do not emit overlapping or nested edits — merge nearby changes into one entry.
+- Keep each edit as small as possible; do not pad with large unchanged regions.
 </constraints>
 
 <errors>

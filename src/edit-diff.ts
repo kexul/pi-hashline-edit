@@ -1,5 +1,11 @@
 import * as Diff from "diff";
-import { computeLineHash } from "./hashline";
+import {
+  computeLineHash,
+  FUZZY_HYPHENS_RE,
+  FUZZY_DOUBLE_QUOTES_RE,
+  FUZZY_SINGLE_QUOTES_RE,
+  FUZZY_UNICODE_SPACES_RE,
+} from "./hashline";
 
 // ─── Line ending normalization ──────────────────────────────────────────
 
@@ -29,17 +35,12 @@ export function stripBom(content: string): { bom: string; text: string } {
 
 // ─── Fuzzy text matching ────────────────────────────────────────────────
 
-const SINGLE_QUOTES_RE = /[\u2018\u2019\u201A\u201B]/g;
-const DOUBLE_QUOTES_RE = /[\u201C\u201D\u201E\u201F]/g;
-const HYPHENS_RE = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
-const UNICODE_SPACES_RE = /[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g;
-
 function normalizeFuzzyChar(ch: string): string {
   return ch
-    .replace(SINGLE_QUOTES_RE, "'")
-    .replace(DOUBLE_QUOTES_RE, '"')
-    .replace(HYPHENS_RE, "-")
-    .replace(UNICODE_SPACES_RE, " ");
+    .replace(FUZZY_SINGLE_QUOTES_RE, "'")
+    .replace(FUZZY_DOUBLE_QUOTES_RE, '"')
+    .replace(FUZZY_HYPHENS_RE, "-")
+    .replace(FUZZY_UNICODE_SPACES_RE, " ");
 }
 
 function normalizeForFuzzyMatch(text: string): string {
@@ -47,10 +48,10 @@ function normalizeForFuzzyMatch(text: string): string {
     .split("\n")
     .map((line) => line.trimEnd())
     .join("\n")
-    .replace(SINGLE_QUOTES_RE, "'")
-    .replace(DOUBLE_QUOTES_RE, '"')
-    .replace(HYPHENS_RE, "-")
-    .replace(UNICODE_SPACES_RE, " ");
+    .replace(FUZZY_SINGLE_QUOTES_RE, "'")
+    .replace(FUZZY_DOUBLE_QUOTES_RE, '"')
+    .replace(FUZZY_HYPHENS_RE, "-")
+    .replace(FUZZY_UNICODE_SPACES_RE, " ");
 }
 
 function buildNormalizedWithMap(text: string): {

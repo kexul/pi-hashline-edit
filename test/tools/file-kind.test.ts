@@ -96,20 +96,19 @@ describe("file kind guards in tools", () => {
       register(pi);
       const readTool = getTool("read");
 
-      const result = await readTool.execute(
-        "r1",
-        { path: "nested" },
-        undefined,
-        undefined,
-        { cwd } as any,
-      );
-
-      expect(result.isError).toBeTrue();
-      expect(getText(result)).toContain("Path is a directory: nested");
+      await expect(
+        readTool.execute(
+          "r1",
+          { path: "nested" },
+          undefined,
+          undefined,
+          { cwd } as any,
+        ),
+      ).rejects.toThrow(/Path is a directory: nested/);
     });
   });
 
-  it("read rejects binary files with a simple classification", async () => {
+  it("read rejects binary files with classifier detail", async () => {
     await withTempBytes(
       "sample.bin",
       new Uint8Array([0x61, 0x00, 0x62, 0x63]),
@@ -118,17 +117,15 @@ describe("file kind guards in tools", () => {
         register(pi);
         const readTool = getTool("read");
 
-        const result = await readTool.execute(
-          "r1",
-          { path: "sample.bin" },
-          undefined,
-          undefined,
-          { cwd } as any,
-        );
-
-        expect(result.isError).toBeTrue();
-        expect(getText(result)).toContain("Path is a binary file: sample.bin");
-        expect(getText(result)).toContain("null bytes detected");
+        await expect(
+          readTool.execute(
+            "r1",
+            { path: "sample.bin" },
+            undefined,
+            undefined,
+            { cwd } as any,
+          ),
+        ).rejects.toThrow(/Path is a binary file: sample\.bin \(null bytes detected\)/i);
       },
     );
   });

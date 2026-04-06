@@ -13,7 +13,7 @@ import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
 import { constants } from "fs";
 import { normalizeToLF, stripBom } from "./edit-diff";
 import { classifyFileKind } from "./file-kind";
-import { computeLineHash } from "./hashline";
+import { computeLineHash, formatHashlineRegion } from "./hashline";
 import { resolveToCwd } from "./path-utils";
 import { throwIfAborted } from "./runtime";
 
@@ -54,20 +54,37 @@ function normalizePositiveInteger(
   return value;
 }
 
+function getPreviewLines(text: string): string[] {
+  if (text.length === 0) {
+    return [];
+  }
+
+  const lines = text.split("\n");
+  return text.endsWith("\n") ? lines.slice(0, -1) : lines;
+}
+
 export function formatHashlineReadPreview(
   text: string,
   options: { offset?: number; limit?: number },
 ): { text: string; truncation?: TruncationResult } {
-  const allLines = text.split("\n");
+  const allLines = getPreviewLines(text);
   const totalLines = allLines.length;
   const startLine = normalizePositiveInteger(options.offset, "offset") ?? 1;
-  if (startLine > totalLines) {
-    const suggestion =
-      totalLines === 0
-        ? "The file is empty."
-        : `Use offset=1 to read from the start, or offset=${totalLines} to read the last line.`;
+  if (totalLines === 0) {
+    if (startLine === 1) {
+      return {
+        text: "File is empty. Use edit with prepend or append and omit pos to insert content.",
+      };
+    }
+
     return {
-      text: `Offset ${startLine} is beyond end of file (${totalLines} lines total). ${suggestion}`,
+      text: `Offset ${startLine} is beyond end of file (0 lines total). The file is empty. Use edit with prepend or append and omit pos to insert content.`,
+    };
+  }
+
+  if (startLine > totalLines) {
+    return {
+      text: `Offset ${startLine} is beyond end of file (${totalLines} lines total). Use offset=1 to read from the start, or offset=${totalLines} to read the last line.`,
     };
   }
 
@@ -142,50 +159,32 @@ export function registerReadTool(pi: ExtensionAPI): void {
       throwIfAborted(signal);
       try {
         await fsAccess(absolutePath, constants.R_OK);
-      } catch {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `File not found or not readable: ${rawPath}`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+      } catch (error: unknown) {
+        const code = error instanceof Error
+          ? (error as NodeJS.ErrnoException).code
+          : undefined;
+        if (code === "ENOENT") {
+          throw new Error(`File not found: ${rawPath}`);
+        }
+        if (code === "EACCES" || code === "EPERM") {
+          throw new Error(`File is not readable: ${rawPath}`);
+        }
+        throw new Error(`Cannot access file: ${rawPath}`);
       }
 
       throwIfAborted(signal);
       const fileKind = await classifyFileKind(absolutePath);
       if (fileKind.kind === "directory") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Path is a directory: ${rawPath}. Use ls to inspect directories.`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+        throw new Error(`Path is a directory: ${rawPath}. Use ls to inspect directories.`);
       }
 
       if (fileKind.kind === "binary") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Path is a binary file: ${rawPath} (${fileKind.description}). Hashline read only supports UTF-8 text files and supported images.`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+        throw new Error(`Path is a binary file: ${rawPath} (${fileKind.description}). Hashline read only supports UTF-8 text files and supported images.`);
       }
 
       if (fileKind.kind === "image") {
         const builtinRead = createReadTool(ctx.cwd);
-        return builtinRead.execute(_toolCallId, params, signal, _onUpdate);
+        return builtinRead.execute(_toolCallId, params, signal, _onUpdate, ctx);
       }
 
       throwIfAborted(signal);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyHashlineEdits, computeLineHash, type HashlineEdit } from "../../src/hashline";
+import { applyHashlineEdits, computeAffectedLineRange, computeLineHash, type HashlineEdit } from "../../src/hashline";
 
 function makeTag(line: number, text: string) {
   return { line, hash: computeLineHash(line, text) };
@@ -214,5 +214,212 @@ describe("applyHashlineEdits — noop detection", () => {
     const content = "aaa\nbbb";
     const edits: HashlineEdit[] = [{ op: "prepend", pos: makeTag(1, "aaa"), lines: [] }];
     expect(() => applyHashlineEdits(content, edits)).toThrow(/empty lines payload/);
+  });
+});
+
+describe("applyHashlineEdits — warning heuristics", () => {
+  it("does not warn when a single prepend only shifts existing lines", () => {
+    const content = Array.from({ length: 120 }, (_, index) => `line ${index + 1}`).join("\n");
+    const edits: HashlineEdit[] = [{ op: "prepend", lines: ["HEADER"] }];
+
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.content.startsWith("HEADER\nline 1\nline 2")).toBeTrue();
+    expect(result.warnings).toBeUndefined();
+  });
+});
+
+describe("applyHashlineEdits — lastChangedLine tracking", () => {
+  it("tracks lastChangedLine when single-line replace expands to multiple lines", () => {
+    const content = "aaa\nbbb\nccc";
+    const edits: HashlineEdit[] = [
+      { op: "replace", pos: makeTag(2, "bbb"), lines: ["B1", "B2", "B3", "B4", "B5"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(6);
+  });
+
+  it("tracks lastChangedLine correctly for single-line delete", () => {
+    const content = "aaa\nbbb\nccc";
+    const edits: HashlineEdit[] = [{ op: "replace", pos: makeTag(2, "bbb"), lines: [] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(2);
+  });
+
+  it("tracks lastChangedLine correctly for multi-line delete", () => {
+    const content = "aaa\nbbb\nccc\nddd\neee\nfff\nggg";
+    const edits: HashlineEdit[] = [{
+      op: "replace",
+      pos: makeTag(2, "bbb"),
+      end: makeTag(4, "ddd"),
+      lines: [],
+    }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(4);
+  });
+
+  it("tracks lastChangedLine for append with terminal newline", () => {
+    const content = "aaa\nbbb\n";
+    const edits: HashlineEdit[] = [{ op: "append", lines: ["ccc"] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(3);
+    expect(result.lastChangedLine).toBe(3);
+  });
+
+  it("tracks lastChangedLine for prepend at BOF", () => {
+    const content = "aaa\nbbb\n";
+    const edits: HashlineEdit[] = [{ op: "prepend", lines: ["zzz"] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(1);
+  });
+
+  it("tracks affected range for prepend + lower replace (P1 regression)", () => {
+    // Prepend at top shifts a lower replace downward; the tracked range must
+    // use final-document coordinates, not stale pre-shift line numbers.
+    const content = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj";
+    const edits: HashlineEdit[] = [
+      { op: "replace", pos: makeTag(5, "e"), lines: ["E1", "E2", "E3", "E4"] },
+      { op: "prepend", lines: ["P1", "P2", "P3"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P1,P2,P3,a,b,c,d,E1,E2,E3,E4,f,g,h,i,j  (16 lines)
+    // Changed region: lines 1-3 (prepend) and 8-11 (replace shifted by +3)
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(11);
+    expect(result.content.split("\n").length).toBe(16);
+  });
+
+  it("tracks lastChangedLine for append + prepend (P1 regression)", () => {
+    // Append near EOF is tracked using intermediate buffer position. When a
+    // prepend runs later it shifts the appended block downward, so the tracked
+    // span must use original coordinates + computeOffset, not insertAt.
+    const content = "a\nb\nc\nd";
+    const edits: HashlineEdit[] = [
+      { op: "append", pos: makeTag(3, "c"), lines: ["X"] },
+      { op: "prepend", lines: ["P1", "P2"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P1,P2,a,b,c,X,d  (7 lines)
+    // Append content "X" ends up at line 6, not line 4.
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(6);
+    expect(result.content).toBe("P1\nP2\na\nb\nc\nX\nd");
+  });
+
+  it("tracks lastChangedLine for EOF append + prepend (P1 regression)", () => {
+    const content = "a\nb\nc\n";
+    const edits: HashlineEdit[] = [
+      { op: "append", lines: ["X"] },
+      { op: "prepend", lines: ["P"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P,a,b,c,X\n  →  P,a,b,c,X  (5 lines after join)
+    // "X" is at line 5, not line 4.
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(5);
+    expect(result.content).toBe("P\na\nb\nc\nX\n");
+  });
+
+  it("tracks lastChangedLine for EOF append (no terminal newline) + prepend (P1 regression)", () => {
+    const content = "a\nb\nc";
+    const edits: HashlineEdit[] = [
+      { op: "append", lines: ["X"] },
+      { op: "prepend", lines: ["P"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P,a,b,c,X  (5 lines)
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(5);
+    expect(result.content).toBe("P\na\nb\nc\nX");
+  });
+
+  it("tracks lastChangedLine for empty-file append + prepend (P1 regression)", () => {
+    const content = "";
+    const edits: HashlineEdit[] = [
+      { op: "append", lines: ["A"] },
+      { op: "prepend", lines: ["P"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P,A  (2 lines)
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(2);
+    expect(result.content).toBe("P\nA");
+  });
+
+  it("tracks lastChangedLine for sentinel append + prepend (P1 regression)", () => {
+    const content = "a\nb\nc\n";
+    const edits: HashlineEdit[] = [
+      { op: "append", pos: makeTag(4, ""), lines: ["X"] },
+      { op: "prepend", lines: ["P"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P,a,b,c,X\n  →  P,a,b,c,X  (5 lines after join)
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(5);
+    expect(result.content).toBe("P\na\nb\nc\nX\n");
+  });
+
+  it("recomputes offset after range-replace autocorrection (P2 regression)", () => {
+    // Autocorrection removes trailing duplicate line from the replacement.
+    // The deltas table must be updated so that computeOffset for edits above
+    // (like a prepend) uses the corrected line count.
+    const content = "a\nb\nc\n}";
+    // Replace lines 2-3 ("b","c") with "B","C","}" — trailing "}" duplicates
+    // line 4, so autocorrection strips it. Actual delta: 2→2 (was 2→3).
+    // Append after line 3 (the range end) is allowed (trailing boundary rule).
+    const edits: HashlineEdit[] = [
+      {
+        op: "replace",
+        pos: makeTag(2, "b"),
+        end: makeTag(3, "c"),
+        lines: ["B", "C", "}"],
+      },
+      { op: "append", pos: makeTag(3, "c"), lines: ["X"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // After autocorrection, replace yields ["B","C"] (2 lines, delta 0).
+    // Without P2 fix, stale delta (+1) would shift append's tracked offset by 1.
+    // Final doc: a,B,C,X,}  (5 lines)
+    expect(result.content).toBe("a\nB\nC\nX\n}");
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(4);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings![0]).toContain("Auto-corrected range replace");
+  });
+
+  it("recomputes offset for prepend after autocorrected replace (P2 regression)", () => {
+    // A prepend at BOF uses computeOffset which must reflect the autocorrected
+    // replace delta, otherwise its tracked fStart is off by the autocorrection amount.
+    const content = "a\nb\nc\nd\n}";
+    // Replace lines 2-4 with "B","C","D","}" — trailing "}" duplicates line 5,
+    // so autocorrection strips it. Delta: 3→3 (was 3→4, stale would be +1).
+    const edits: HashlineEdit[] = [
+      {
+        op: "replace",
+        pos: makeTag(2, "b"),
+        end: makeTag(4, "d"),
+        lines: ["B", "C", "D", "}"],
+      },
+      { op: "prepend", lines: ["P"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // After autocorrection: replace is a no-net-change (3→3), prepend adds 1 line.
+    // Final doc: P,a,B,C,D,}  (6 lines)
+    // Replace tracked at line 2+1=3 (shifted by prepend's +1), lines 3-5.
+    // Prepend tracked at line 1.
+    expect(result.content).toBe("P\na\nB\nC\nD\n}");
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(5);
+    expect(result.warnings).toBeDefined();
+    expect(result.warnings![0]).toContain("Auto-corrected range replace");
   });
 });

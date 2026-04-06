@@ -40,9 +40,6 @@ interface NoopEdit {
  */
 const NIBBLE_STR = "ZPMQVRWSNKTXJBYH";
 const HASH_ALPHABET_RE = new RegExp(`^[${NIBBLE_STR}]+$`);
-const HASHLINE_REF_RE = new RegExp(
-  `^\\s*[>+-]*\\s*(\\d+)\\s*#\\s*([${NIBBLE_STR}]{2})(?:\\s*:.*)?\\s*$`,
-);
 
 const DICT = Array.from({ length: 256 }, (_, i) => {
   const h = i >>> 4;
@@ -87,10 +84,11 @@ export function computeLineHash(idx: number, line: string): string {
   return DICT[xxh32(line, seed) & 0xff];
 }
 
-const FUZZY_SINGLE_QUOTES_RE = /[\u2018\u2019\u201A\u201B]/g;
-const FUZZY_DOUBLE_QUOTES_RE = /[\u201C\u201D\u201E\u201F]/g;
-const FUZZY_HYPHENS_RE = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
-const FUZZY_UNICODE_SPACES_RE = /[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g;
+/** Shared fuzzy-match Unicode replacement regexes (also used by edit-diff.ts). */
+export const FUZZY_SINGLE_QUOTES_RE = /[\u2018\u2019\u201A\u201B]/g;
+export const FUZZY_DOUBLE_QUOTES_RE = /[\u201C\u201D\u201E\u201F]/g;
+export const FUZZY_HYPHENS_RE = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
+export const FUZZY_UNICODE_SPACES_RE = /[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g;
 
 function normalizeFuzzyLine(text: string): string {
   return text
@@ -386,10 +384,6 @@ function shouldAutocorrect(line: string, otherLine: string): boolean {
   return true;
 }
 
-function isEscapedTabAutocorrectEnabled(): boolean {
-  return process.env.PI_HASHLINE_AUTOCORRECT_ESCAPED_TABS === "1";
-}
-
 function countLeadingTabs(line: string): number {
   let count = 0;
   while (line[count] === "\t") {
@@ -403,7 +397,7 @@ function maybeAutocorrectEscapedTabIndentation(
   warnings: string[],
   fileLines: string[],
 ): void {
-  if (!isEscapedTabAutocorrectEnabled()) {
+  if (process.env.PI_HASHLINE_AUTOCORRECT_ESCAPED_TABS !== "1") {
     return;
   }
 
@@ -627,19 +621,37 @@ export function applyHashlineEdits(
 ): {
   content: string;
   firstChangedLine: number | undefined;
+  lastChangedLine: number | undefined;
   warnings?: string[];
   noopEdits?: NoopEdit[];
 } {
   throwIfAborted(signal);
-  if (!edits.length) return { content, firstChangedLine: undefined };
+  if (!edits.length) return { content, firstChangedLine: undefined, lastChangedLine: undefined };
 
   const workingEdits = edits.map(cloneHashlineEdit);
   const fileLines = content.split("\n");
   const hasTerminalNewline = content.endsWith("\n");
   const origLines = [...fileLines];
-  let firstChanged: number | undefined;
   const noopEdits: NoopEdit[] = [];
   const warnings: string[] = [];
+
+  // Track affected ranges in ORIGINAL document coordinates, then convert to
+  // final positions after all edits. This avoids the stale-position bug where
+  // track() records coordinates during bottom-up mutation that later get shifted
+  // by edits above them (e.g. prepend at top shifts a tracked replace downward).
+  const affectedEdits: Array<{
+    fStart: number;
+    newLength: number;
+    originalLength: number;
+  }> = [];
+
+  function trackEdit(
+    fStart: number,
+    newLength: number,
+    originalLength = newLength,
+  ): void {
+    affectedEdits.push({ fStart, newLength, originalLength });
+  }
 
   // Validate all refs before mutation
   const mismatches: HashMismatch[] = [];
@@ -789,6 +801,37 @@ export function applyHashlineEdits(
       b.sortLine - a.sortLine || a.precedence - b.precedence || a.idx - b.idx,
   );
 
+  // Pre-compute delta map for offset lookups during edit application.
+  const deltas: Array<[number, number]> = [];
+  for (const { edit } of annotated) {
+    switch (edit.op) {
+      case "replace": {
+        const count = edit.end
+          ? edit.end.line - edit.pos.line + 1
+          : 1;
+        deltas.push([edit.pos.line - 1, edit.lines.length - count]);
+        break;
+      }
+      case "append": {
+        deltas.push([edit.pos ? edit.pos.line - 1 : origLines.length, edit.lines.length]);
+        break;
+      }
+      case "prepend": {
+        deltas.push([edit.pos ? edit.pos.line - 1 : 0, edit.lines.length]);
+        break;
+      }
+    }
+  }
+  deltas.sort((a, b) => a[0] - b[0]);
+
+  function computeOffset(lineIdx: number): number {
+    let offset = 0;
+    for (const [idx, d] of deltas) {
+      if (idx >= lineIdx) break;
+      offset += d;
+    }
+    return offset;
+  }
 
   // Apply edits bottom-up
   for (const { edit, idx } of annotated) {
@@ -810,7 +853,11 @@ export function applyHashlineEdits(
             break;
           }
           fileLines.splice(edit.pos.line - 1, 1, ...newLines);
-          track(edit.pos.line);
+          trackEdit(
+            edit.pos.line + computeOffset(edit.pos.line - 1),
+            newLines.length,
+            newLines.length === 0 ? 1 : newLines.length,
+          );
         } else {
           const count = edit.end.line - edit.pos.line + 1;
           const orig = origLines.slice(
@@ -866,7 +913,23 @@ export function applyHashlineEdits(
             );
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines);
-          track(edit.pos.line);
+          // P2: Update the delta for this replace to reflect autocorrected line count,
+          // so subsequent computeOffset calls for edits above use the correct offset.
+          const origDelta = edit.lines.length - count;
+          const actualDelta = newLines.length - count;
+          if (actualDelta !== origDelta) {
+            for (const d of deltas) {
+              if (d[0] === edit.pos.line - 1 && d[1] === origDelta) {
+                d[1] = actualDelta;
+                break;
+              }
+            }
+          }
+          trackEdit(
+            edit.pos.line + computeOffset(edit.pos.line - 1),
+            newLines.length,
+            newLines.length === 0 ? count : newLines.length,
+          );
         }
         break;
       }
@@ -881,20 +944,31 @@ export function applyHashlineEdits(
           break;
         }
         if (edit.pos) {
-          const insertAt =
-            hasTerminalNewline && edit.pos.line === fileLines.length
-              ? fileLines.length - 1
-              : edit.pos.line;
+          const isSentinelAppend = hasTerminalNewline && edit.pos.line === origLines.length;
+          const insertAt = isSentinelAppend
+            ? fileLines.length - 1
+            : edit.pos.line;
           fileLines.splice(insertAt, 0, ...inserted);
-          track(insertAt + 1);
+          // Use original coordinates + offset to get final-document line numbers,
+          // accounting for edits applied later (e.g. prepends that shift content down).
+          if (isSentinelAppend) {
+            trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), inserted.length);
+          } else {
+            trackEdit(edit.pos.line + 1 + computeOffset(edit.pos.line - 1), inserted.length);
+          }
         } else {
           if (fileLines.length === 1 && fileLines[0] === "") {
             fileLines.splice(0, 1, ...inserted);
-            track(1);
+            trackEdit(1 + computeOffset(origLines.length), inserted.length);
           } else {
             const insertAt = hasTerminalNewline ? fileLines.length - 1 : fileLines.length;
             fileLines.splice(insertAt, 0, ...inserted);
-            track(insertAt + 1);
+            // Use original coordinates + offset to get final-document line numbers.
+            if (hasTerminalNewline) {
+              trackEdit(origLines.length + computeOffset(origLines.length - 1), inserted.length);
+            } else {
+              trackEdit(origLines.length + 1 + computeOffset(origLines.length), inserted.length);
+            }
           }
         }
         break;
@@ -911,40 +985,163 @@ export function applyHashlineEdits(
         }
         if (edit.pos) {
           fileLines.splice(edit.pos.line - 1, 0, ...inserted);
-          track(edit.pos.line);
+          trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), inserted.length);
+        } else if (fileLines.length === 1 && fileLines[0] === "") {
+          fileLines.splice(0, 1, ...inserted);
+          trackEdit(1, inserted.length);
         } else {
-          if (fileLines.length === 1 && fileLines[0] === "") {
-            fileLines.splice(0, 1, ...inserted);
-          } else {
-            fileLines.splice(0, 0, ...inserted);
-          }
-          track(1);
+          fileLines.splice(0, 0, ...inserted);
+          trackEdit(1, inserted.length);
         }
         break;
       }
     }
   }
 
-  let diff = Math.abs(fileLines.length - origLines.length);
-  for (let i = 0; i < Math.min(fileLines.length, origLines.length); i++) {
-    if (fileLines[i] !== origLines[i]) diff++;
-  }
-  if (diff > dedupedEdits.length * 4) {
-    warnings.push(
-      `Edit changed ${diff} lines across ${dedupedEdits.length} operations — verify no unintended reformatting.`,
-    );
+  // Convert tracked edits (which record final start line and new line count)
+  // into firstChanged / lastChanged for the return value.
+  let firstChanged: number | undefined;
+  let lastChanged: number | undefined;
+  if (affectedEdits.length > 0) {
+    let minFinal = Infinity;
+    let maxFinal = -Infinity;
+    for (const { fStart, newLength, originalLength } of affectedEdits) {
+      const affectedLength = newLength > 0 ? newLength : originalLength;
+      const fEnd = fStart + affectedLength - 1;
+      if (fStart < minFinal) minFinal = fStart;
+      if (fEnd > maxFinal) maxFinal = fEnd;
+    }
+    if (minFinal !== Infinity) {
+      firstChanged = minFinal;
+      lastChanged = maxFinal;
+    }
   }
 
   return {
     content: fileLines.join("\n"),
     firstChangedLine: firstChanged,
+    lastChangedLine: lastChanged,
     ...(warnings.length ? { warnings } : {}),
     ...(noopEdits.length ? { noopEdits } : {}),
   };
+}
 
-  function track(line: number): void {
-    if (firstChanged === undefined || line < firstChanged) {
-      firstChanged = line;
-    }
+// ─── Affected-line computation (for returning anchors after edit) ───────
+
+const ANCHOR_CONTEXT_LINES = 2;
+const ANCHOR_MAX_OUTPUT_LINES = 12;
+
+/**
+ * Compute the post-edit line range covering changed lines plus context.
+ * Uses `firstChangedLine` and `lastChangedLine` from the edit result for
+ * precise bounds. Returns null if the range (with context) exceeds the
+ * output budget, signalling that the LLM should re-read instead.
+ */
+export function computeAffectedLineRange(params: {
+  firstChangedLine: number | undefined;
+  lastChangedLine: number | undefined;
+  resultLineCount: number;
+  contextLines?: number;
+  maxOutputLines?: number;
+}): { start: number; end: number } | null {
+  const {
+    firstChangedLine,
+    lastChangedLine,
+    resultLineCount,
+    contextLines = ANCHOR_CONTEXT_LINES,
+    maxOutputLines = ANCHOR_MAX_OUTPUT_LINES,
+  } = params;
+
+  if (firstChangedLine === undefined || lastChangedLine === undefined) {
+    return null;
   }
+
+  // Empty file after edit: no meaningful anchor block.
+  if (resultLineCount === 0) {
+    return null;
+  }
+
+  const start = Math.max(1, firstChangedLine - contextLines);
+  const end = Math.min(resultLineCount, lastChangedLine + contextLines);
+
+  // Guard against inverted range (can happen when context pushes end below start).
+  if (end < start) {
+    return null;
+  }
+
+  if (end - start + 1 > maxOutputLines) {
+    return null;
+  }
+
+  return { start, end };
+}
+
+export function formatHashlineRegion(
+  lines: string[],
+  startLine: number,
+): string {
+  return lines
+    .map((line, index) => {
+      const lineNumber = startLine + index;
+      return `${lineNumber}#${computeLineHash(lineNumber, line)}:${line}`;
+    })
+    .join("\n");
+}
+
+// ─── Legacy edit line range computation ─────────────────────────────
+
+/**
+ * Compute first/last changed line numbers for legacy (oldText/newText) edits.
+ * Uses character-level diff to locate the changed span, then maps to line
+ * numbers in the result document so downstream anchor chaining works.
+ */
+export function computeLegacyEditLineRange(
+  original: string,
+  result: string,
+): { firstChangedLine: number; lastChangedLine: number } | null {
+  if (original === result) return null;
+
+  let firstDiff = 0;
+  const minLen = Math.min(original.length, result.length);
+  while (firstDiff < minLen && original[firstDiff] === result[firstDiff]) {
+    firstDiff++;
+  }
+  if (firstDiff === minLen && original.length === result.length) return null;
+
+  let lastOrig = original.length - 1;
+  let lastRes = result.length - 1;
+  while (
+    lastOrig >= firstDiff &&
+    lastRes >= firstDiff &&
+    original[lastOrig] === result[lastRes]
+  ) {
+    lastOrig--;
+    lastRes--;
+  }
+
+  // Map the last-changed character index in the result to a 1-based line number.
+  function indexToLine(charIdx: number, text: string): number {
+    let line = 1;
+    for (let i = 0; i < charIdx && i < text.length; i++) {
+      if (text[i] === "\n") line++;
+    }
+    return line;
+  }
+
+  const firstChangedLine = indexToLine(firstDiff + 1, result);
+  let lastChangedLine: number;
+  if (lastRes < firstDiff) {
+    // Deletion: suffix match backtracked into the unchanged prefix region.
+    // The changed span extends to the last line of the result document.
+    const resultLines = result.split("\n");
+    lastChangedLine = result.endsWith("\n") ? resultLines.length - 1 : resultLines.length;
+  } else if (firstDiff === 0 && original.length > 0 && result.endsWith(original)) {
+    // Pure prepend: original content is intact at the end, only new lines were
+    // inserted before it. The changed span covers only the prepended lines.
+    lastChangedLine = firstChangedLine;
+  } else {
+    lastChangedLine = indexToLine(lastRes + 1, result);
+  }
+
+  return { firstChangedLine, lastChangedLine };
 }
