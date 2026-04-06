@@ -632,10 +632,24 @@ export function applyHashlineEdits(
   const fileLines = content.split("\n");
   const hasTerminalNewline = content.endsWith("\n");
   const origLines = [...fileLines];
-  let firstChanged: number | undefined;
-  let lastChanged: number | undefined;
   const noopEdits: NoopEdit[] = [];
   const warnings: string[] = [];
+
+  // Track affected ranges in ORIGINAL document coordinates, then convert to
+  // final positions after all edits. This avoids the stale-position bug where
+  // track() records coordinates during bottom-up mutation that later get shifted
+  // by edits above them (e.g. prepend at top shifts a tracked replace downward).
+  const affectedEdits: Array<{ fStart: number; newLength: number }> = [];
+
+  function trackEdit(fStart: number, newLength: number): void {
+    if (newLength > 0) {
+      affectedEdits.push({ fStart, newLength });
+    }
+    // Deletes with newLength === 0 are tracked as a point at the deletion site.
+    else {
+      affectedEdits.push({ fStart, newLength: 0 });
+    }
+  }
 
   // Validate all refs before mutation
   const mismatches: HashMismatch[] = [];
@@ -785,6 +799,37 @@ export function applyHashlineEdits(
       b.sortLine - a.sortLine || a.precedence - b.precedence || a.idx - b.idx,
   );
 
+  // Pre-compute delta map for offset lookups during edit application.
+  const deltas: Array<[number, number]> = [];
+  for (const { edit } of annotated) {
+    switch (edit.op) {
+      case "replace": {
+        const count = edit.end
+          ? edit.end.line - edit.pos.line + 1
+          : 1;
+        deltas.push([edit.pos.line - 1, edit.lines.length - count]);
+        break;
+      }
+      case "append": {
+        deltas.push([edit.pos ? edit.pos.line - 1 : origLines.length, edit.lines.length]);
+        break;
+      }
+      case "prepend": {
+        deltas.push([edit.pos ? edit.pos.line - 1 : 0, edit.lines.length]);
+        break;
+      }
+    }
+  }
+  deltas.sort((a, b) => a[0] - b[0]);
+
+  function computeOffset(lineIdx: number): number {
+    let offset = 0;
+    for (const [idx, d] of deltas) {
+      if (idx >= lineIdx) break;
+      offset += d;
+    }
+    return offset;
+  }
 
   // Apply edits bottom-up
   for (const { edit, idx } of annotated) {
@@ -806,11 +851,7 @@ export function applyHashlineEdits(
             break;
           }
           fileLines.splice(edit.pos.line - 1, 1, ...newLines);
-          if (newLines.length > 0) {
-            trackRange(edit.pos.line, edit.pos.line + newLines.length - 1);
-          } else {
-            track(edit.pos.line);
-          }
+          trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), newLines.length);
         } else {
           const count = edit.end.line - edit.pos.line + 1;
           const orig = origLines.slice(
@@ -866,11 +907,7 @@ export function applyHashlineEdits(
             );
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines);
-          if (newLines.length > 0) {
-            trackRange(edit.pos.line, edit.pos.line + newLines.length - 1);
-          } else {
-            track(edit.pos.line);
-          }
+          trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), newLines.length);
         }
         break;
       }
@@ -890,15 +927,15 @@ export function applyHashlineEdits(
               ? fileLines.length - 1
               : edit.pos.line;
           fileLines.splice(insertAt, 0, ...inserted);
-          trackRange(insertAt + 1, insertAt + inserted.length);
+          trackEdit(insertAt + 1, inserted.length);
         } else {
           if (fileLines.length === 1 && fileLines[0] === "") {
             fileLines.splice(0, 1, ...inserted);
-            trackRange(1, inserted.length);
+            trackEdit(1, inserted.length);
           } else {
             const insertAt = hasTerminalNewline ? fileLines.length - 1 : fileLines.length;
             fileLines.splice(insertAt, 0, ...inserted);
-            trackRange(insertAt + 1, insertAt + inserted.length);
+            trackEdit(insertAt + 1, inserted.length);
           }
         }
         break;
@@ -915,16 +952,34 @@ export function applyHashlineEdits(
         }
         if (edit.pos) {
           fileLines.splice(edit.pos.line - 1, 0, ...inserted);
-          trackRange(edit.pos.line, edit.pos.line + inserted.length - 1);
+          trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), inserted.length);
         } else if (fileLines.length === 1 && fileLines[0] === "") {
           fileLines.splice(0, 1, ...inserted);
-          trackRange(1, inserted.length);
+          trackEdit(1, inserted.length);
         } else {
           fileLines.splice(0, 0, ...inserted);
-          trackRange(1, inserted.length);
+          trackEdit(1, inserted.length);
         }
         break;
       }
+    }
+  }
+
+  // Convert tracked edits (which record final start line and new line count)
+  // into firstChanged / lastChanged for the return value.
+  let firstChanged: number | undefined;
+  let lastChanged: number | undefined;
+  if (affectedEdits.length > 0) {
+    let minFinal = Infinity;
+    let maxFinal = -Infinity;
+    for (const { fStart, newLength } of affectedEdits) {
+      const fEnd = newLength > 0 ? fStart + newLength - 1 : fStart;
+      if (fStart < minFinal) minFinal = fStart;
+      if (fEnd > maxFinal) maxFinal = fEnd;
+    }
+    if (minFinal !== Infinity) {
+      firstChanged = minFinal;
+      lastChanged = maxFinal;
     }
   }
 
@@ -936,20 +991,6 @@ export function applyHashlineEdits(
     ...(warnings.length ? { warnings } : {}),
     ...(noopEdits.length ? { noopEdits } : {}),
   };
-
-  function track(line: number): void {
-    if (firstChanged === undefined || line < firstChanged) {
-      firstChanged = line;
-    }
-    if (lastChanged === undefined || line > lastChanged) {
-      lastChanged = line;
-    }
-  }
-
-  function trackRange(start: number, end: number): void {
-    track(start);
-    track(end);
-  }
 }
 
 // ─── Affected-line computation (for returning anchors after edit) ───────
@@ -982,8 +1023,18 @@ export function computeAffectedLineRange(params: {
     return null;
   }
 
+  // Empty file after edit: no meaningful anchor block.
+  if (resultLineCount === 0) {
+    return null;
+  }
+
   const start = Math.max(1, firstChangedLine - contextLines);
   const end = Math.min(resultLineCount, lastChangedLine + contextLines);
+
+  // Guard against inverted range (can happen when context pushes end below start).
+  if (end < start) {
+    return null;
+  }
 
   if (end - start + 1 > maxOutputLines) {
     return null;
