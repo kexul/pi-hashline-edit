@@ -228,3 +228,43 @@ describe("applyHashlineEdits — warning heuristics", () => {
     expect(result.warnings).toBeUndefined();
   });
 });
+
+describe("applyHashlineEdits — lastChangedLine tracking", () => {
+  it("tracks lastChangedLine when single-line replace expands to multiple lines", () => {
+    const content = "aaa\nbbb\nccc";
+    const edits: HashlineEdit[] = [
+      { op: "replace", pos: makeTag(2, "bbb"), lines: ["B1", "B2", "B3", "B4", "B5"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(6);
+  });
+
+  it("tracks lastChangedLine correctly for single-line delete", () => {
+    const content = "aaa\nbbb\nccc";
+    const edits: HashlineEdit[] = [{ op: "replace", pos: makeTag(2, "bbb"), lines: [] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(2);
+    expect(result.lastChangedLine).toBe(2);
+  });
+
+  it("tracks lastChangedLine for append with terminal newline", () => {
+    const content = "aaa\nbbb\n";
+    const edits: HashlineEdit[] = [{ op: "append", lines: ["ccc"] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(3);
+    expect(result.lastChangedLine).toBe(3);
+  });
+
+  it("tracks lastChangedLine for prepend at BOF", () => {
+    const content = "aaa\nbbb\n";
+    const edits: HashlineEdit[] = [{ op: "prepend", lines: ["zzz"] }];
+    const result = applyHashlineEdits(content, edits);
+
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(1);
+  });
+});

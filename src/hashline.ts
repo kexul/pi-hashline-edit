@@ -806,7 +806,11 @@ export function applyHashlineEdits(
             break;
           }
           fileLines.splice(edit.pos.line - 1, 1, ...newLines);
-          track(edit.pos.line);
+          if (newLines.length > 0) {
+            trackRange(edit.pos.line, edit.pos.line + newLines.length - 1);
+          } else {
+            track(edit.pos.line);
+          }
         } else {
           const count = edit.end.line - edit.pos.line + 1;
           const orig = origLines.slice(

@@ -137,6 +137,70 @@ describe("chained edit anchors", () => {
     });
   });
 
+  it("does not leak terminal-newline sentinel in Updated anchors for append on newline-terminated file", async () => {
+    await withTempFile("sentinel.ts", "existing\n", async ({ cwd }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const ctx = { cwd, ui: { notify() {} } } as any;
+
+      const readTool = getTool("read");
+      const editTool = getTool("edit");
+
+      const firstRead = await readTool.execute("r1", { path: "sentinel.ts" }, undefined, undefined, ctx);
+      const existingRef = firstRead.content[0].text
+        .split("\n")
+        .find((line: string) => line.includes(":existing"))!
+        .split(":")[0]!;
+
+      const editResult = await editTool.execute(
+        "e1",
+        { path: "sentinel.ts", edits: [{ op: "append", pos: existingRef, lines: ["appended"] }] },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+      // Should have anchors, but none should be an empty sentinel like "3#XX:"
+      expect(editResult.content[0].text).toContain("--- Updated anchors");
+      const anchorLines = editResult.content[0].text
+        .split("\n")
+        .filter((line: string) => line.match(/^\d+#\w{2}:.*/));
+      for (const line of anchorLines) {
+        expect(line).not.toMatch(/^\d+#\w{2}:$/);
+      }
+    });
+  });
+
+  it("omits Updated anchors when single-line replace expands beyond budget", async () => {
+    // Replace 1 line with 11 new lines: span=11, +4 context = 15 > 12 budget.
+    await withTempFile("expand.ts", "before\ntarget\nafter\n", async ({ cwd }) => {
+      const { pi, getTool } = makeFakePiRegistry();
+      register(pi);
+      const ctx = { cwd, ui: { notify() {} } } as any;
+
+      const readTool = getTool("read");
+      const editTool = getTool("edit");
+
+      const firstRead = await readTool.execute("r1", { path: "expand.ts" }, undefined, undefined, ctx);
+      const targetRef = firstRead.content[0].text
+        .split("\n")
+        .find((line: string) => line.includes(":target"))!
+        .split(":")[0]!;
+
+      const newLines = Array.from({ length: 11 }, (_, i) => `EXPANDED ${i + 1}`);
+      const editResult = await editTool.execute(
+        "e1",
+        { path: "expand.ts", edits: [{ op: "replace", pos: targetRef, lines: newLines }] },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+      // 11 new lines span 2-12, +4 context = 15 > 12 → no anchors block.
+      expect(editResult.content[0].text).not.toContain("--- Updated anchors");
+    });
+  });
+
   it("unchanged line anchors from original read remain valid after chained edits", async () => {
     await withTempFile("stale.ts", "alpha\nbeta\n", async ({ cwd }) => {
       const { pi, getTool } = makeFakePiRegistry();
