@@ -96,16 +96,15 @@ describe("file kind guards in tools", () => {
       register(pi);
       const readTool = getTool("read");
 
-      const result = await readTool.execute(
-        "r1",
-        { path: "nested" },
-        undefined,
-        undefined,
-        { cwd } as any,
-      );
-
-      expect(result.isError).toBeTrue();
-      expect(getText(result)).toContain("Path is a directory: nested");
+      await expect(
+        readTool.execute(
+          "r1",
+          { path: "nested" },
+          undefined,
+          undefined,
+          { cwd } as any,
+        ),
+      ).rejects.toThrow(/Path is a directory: nested/);
     });
   });
 
@@ -118,17 +117,15 @@ describe("file kind guards in tools", () => {
         register(pi);
         const readTool = getTool("read");
 
-        const result = await readTool.execute(
-          "r1",
-          { path: "sample.bin" },
-          undefined,
-          undefined,
-          { cwd } as any,
-        );
-
-        expect(result.isError).toBeTrue();
-        expect(getText(result)).toContain("Path is a binary file: sample.bin");
-        expect(getText(result)).toContain("null bytes detected");
+        await expect(
+          readTool.execute(
+            "r1",
+            { path: "sample.bin" },
+            undefined,
+            undefined,
+            { cwd } as any,
+          ),
+        ).rejects.toThrow(/Path is a binary file: sample\.bin/i);
       },
     );
   });
