@@ -907,6 +907,18 @@ export function applyHashlineEdits(
             );
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines);
+          // P2: Update the delta for this replace to reflect autocorrected line count,
+          // so subsequent computeOffset calls for edits above use the correct offset.
+          const origDelta = edit.lines.length - count;
+          const actualDelta = newLines.length - count;
+          if (actualDelta !== origDelta) {
+            for (const d of deltas) {
+              if (d[0] === edit.pos.line - 1 && d[1] === origDelta) {
+                d[1] = actualDelta;
+                break;
+              }
+            }
+          }
           trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), newLines.length);
         }
         break;
@@ -922,20 +934,31 @@ export function applyHashlineEdits(
           break;
         }
         if (edit.pos) {
-          const insertAt =
-            hasTerminalNewline && edit.pos.line === fileLines.length
-              ? fileLines.length - 1
-              : edit.pos.line;
+          const isSentinelAppend = hasTerminalNewline && edit.pos.line === origLines.length;
+          const insertAt = isSentinelAppend
+            ? fileLines.length - 1
+            : edit.pos.line;
           fileLines.splice(insertAt, 0, ...inserted);
-          trackEdit(insertAt + 1, inserted.length);
+          // Use original coordinates + offset to get final-document line numbers,
+          // accounting for edits applied later (e.g. prepends that shift content down).
+          if (isSentinelAppend) {
+            trackEdit(edit.pos.line + computeOffset(edit.pos.line - 1), inserted.length);
+          } else {
+            trackEdit(edit.pos.line + 1 + computeOffset(edit.pos.line - 1), inserted.length);
+          }
         } else {
           if (fileLines.length === 1 && fileLines[0] === "") {
             fileLines.splice(0, 1, ...inserted);
-            trackEdit(1, inserted.length);
+            trackEdit(1 + computeOffset(origLines.length), inserted.length);
           } else {
             const insertAt = hasTerminalNewline ? fileLines.length - 1 : fileLines.length;
             fileLines.splice(insertAt, 0, ...inserted);
-            trackEdit(insertAt + 1, inserted.length);
+            // Use original coordinates + offset to get final-document line numbers.
+            if (hasTerminalNewline) {
+              trackEdit(origLines.length + computeOffset(origLines.length - 1), inserted.length);
+            } else {
+              trackEdit(origLines.length + 1 + computeOffset(origLines.length), inserted.length);
+            }
           }
         }
         break;
