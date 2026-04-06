@@ -866,7 +866,11 @@ export function applyHashlineEdits(
             );
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines);
-          trackRange(edit.pos.line, edit.pos.line + newLines.length - 1);
+          if (newLines.length > 0) {
+            trackRange(edit.pos.line, edit.pos.line + newLines.length - 1);
+          } else {
+            track(edit.pos.line);
+          }
         }
         break;
       }

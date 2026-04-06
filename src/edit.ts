@@ -627,8 +627,12 @@ export function registerEditTool(pi: ExtensionAPI): void {
           : "";
 
         // Compute updated anchors for chaining edits without re-reading.
-        // Strip the terminal-newline sentinel to stay consistent with read tool output.
-        const resultLines = result.endsWith("\n") ? result.split("\n").slice(0, -1) : result.split("\n");
+        // Reuse read tool semantics: empty string → 0 lines, trailing newline sentinel stripped.
+        const resultLines = result.length === 0
+          ? []
+          : result.endsWith("\n")
+            ? result.split("\n").slice(0, -1)
+            : result.split("\n");
         const anchorRange = computeAffectedLineRange({
           firstChangedLine,
           lastChangedLine,

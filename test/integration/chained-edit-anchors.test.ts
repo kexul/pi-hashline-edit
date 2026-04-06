@@ -51,7 +51,7 @@ describe("chained edit anchors", () => {
 
   it("omits anchors when post-edit affected span is too large", async () => {
     // Replace 15 lines with 15 new lines: span=15, +4 context = 19 > 12 budget.
-    const fifteenLines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+    const fifteenLines = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
     await withTempFile("big.ts", fifteenLines, async ({ cwd }) => {
       const { pi, getTool } = makeFakePiRegistry();
       register(pi);
