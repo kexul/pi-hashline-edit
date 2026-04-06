@@ -90,4 +90,16 @@ describe("computeAffectedLineRange", () => {
     });
     expect(result).toEqual({ start: 4, end: 6 });
   });
+
+  it("returns null for empty-file result (P2 regression)", () => {
+    // When an edit deletes all content, resultLineCount is 0 and the
+    // range should be null, not a bogus { start: 1, end: 0 }.
+    expect(
+      computeAffectedLineRange({
+        firstChangedLine: 1,
+        lastChangedLine: 1,
+        resultLineCount: 0,
+      }),
+    ).toBeNull();
+  });
 });

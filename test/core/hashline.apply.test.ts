@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { applyHashlineEdits, computeLineHash, type HashlineEdit } from "../../src/hashline";
+import { applyHashlineEdits, computeAffectedLineRange, computeLineHash, type HashlineEdit } from "../../src/hashline";
 
 function makeTag(line: number, text: string) {
   return { line, hash: computeLineHash(line, text) };
@@ -266,5 +266,21 @@ describe("applyHashlineEdits — lastChangedLine tracking", () => {
 
     expect(result.firstChangedLine).toBe(1);
     expect(result.lastChangedLine).toBe(1);
+  });
+
+  it("tracks affected range for prepend + lower replace (P1 regression)", () => {
+    // Prepend at top shifts a lower replace downward; the tracked range must
+    // use final-document coordinates, not stale pre-shift line numbers.
+    const content = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj";
+    const edits: HashlineEdit[] = [
+      { op: "replace", pos: makeTag(5, "e"), lines: ["E1", "E2", "E3", "E4"] },
+      { op: "prepend", lines: ["P1", "P2", "P3"] },
+    ];
+    const result = applyHashlineEdits(content, edits);
+    // Final doc: P1,P2,P3,a,b,c,d,E1,E2,E3,E4,f,g,h,i,j  (16 lines)
+    // Changed region: lines 1-3 (prepend) and 8-11 (replace shifted by +3)
+    expect(result.firstChangedLine).toBe(1);
+    expect(result.lastChangedLine).toBe(11);
+    expect(result.content.split("\n").length).toBe(16);
   });
 });
