@@ -504,10 +504,9 @@ export function registerEditTool(pi: ExtensionAPI): void {
     },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const preparedParams = prepareEditArguments(params);
-      assertEditRequest(preparedParams);
+      assertEditRequest(params);
 
-      const normalizedParams = preparedParams as EditRequestParams;
+      const normalizedParams = params as EditRequestParams;
       const path = normalizedParams.path;
       const absolutePath = resolveToCwd(path, ctx.cwd);
       const toolEdits = Array.isArray(normalizedParams.edits)

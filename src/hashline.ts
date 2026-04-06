@@ -40,9 +40,6 @@ interface NoopEdit {
  */
 const NIBBLE_STR = "ZPMQVRWSNKTXJBYH";
 const HASH_ALPHABET_RE = new RegExp(`^[${NIBBLE_STR}]+$`);
-const HASHLINE_REF_RE = new RegExp(
-  `^\\s*[>+-]*\\s*(\\d+)\\s*#\\s*([${NIBBLE_STR}]{2})(?:\\s*:.*)?\\s*$`,
-);
 
 const DICT = Array.from({ length: 256 }, (_, i) => {
   const h = i >>> 4;
@@ -87,10 +84,11 @@ export function computeLineHash(idx: number, line: string): string {
   return DICT[xxh32(line, seed) & 0xff];
 }
 
-const FUZZY_SINGLE_QUOTES_RE = /[\u2018\u2019\u201A\u201B]/g;
-const FUZZY_DOUBLE_QUOTES_RE = /[\u201C\u201D\u201E\u201F]/g;
-const FUZZY_HYPHENS_RE = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
-const FUZZY_UNICODE_SPACES_RE = /[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g;
+/** Shared fuzzy-match Unicode replacement regexes (also used by edit-diff.ts). */
+export const FUZZY_SINGLE_QUOTES_RE = /[\u2018\u2019\u201A\u201B]/g;
+export const FUZZY_DOUBLE_QUOTES_RE = /[\u201C\u201D\u201E\u201F]/g;
+export const FUZZY_HYPHENS_RE = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g;
+export const FUZZY_UNICODE_SPACES_RE = /[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g;
 
 function normalizeFuzzyLine(text: string): string {
   return text
@@ -386,10 +384,6 @@ function shouldAutocorrect(line: string, otherLine: string): boolean {
   return true;
 }
 
-function isEscapedTabAutocorrectEnabled(): boolean {
-  return process.env.PI_HASHLINE_AUTOCORRECT_ESCAPED_TABS === "1";
-}
-
 function countLeadingTabs(line: string): number {
   let count = 0;
   while (line[count] === "\t") {
@@ -403,7 +397,7 @@ function maybeAutocorrectEscapedTabIndentation(
   warnings: string[],
   fileLines: string[],
 ): void {
-  if (!isEscapedTabAutocorrectEnabled()) {
+  if (process.env.PI_HASHLINE_AUTOCORRECT_ESCAPED_TABS !== "1") {
     return;
   }
 

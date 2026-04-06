@@ -8,7 +8,7 @@ async function resolveAtomicWritePath(path: string): Promise<string> {
 
   while (true) {
     if (visited.has(currentPath)) {
-      const error: any = new Error(`Too many symbolic links while resolving ${path}`);
+      const error = new Error(`Too many symbolic links while resolving ${path}`) as NodeJS.ErrnoException;
       error.code = "ELOOP";
       throw error;
     }
@@ -18,8 +18,8 @@ async function resolveAtomicWritePath(path: string): Promise<string> {
       if (!(await lstat(currentPath)).isSymbolicLink()) {
         return currentPath;
       }
-    } catch (error: any) {
-      if (error?.code === "ENOENT") {
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
         return currentPath;
       }
       throw error;
@@ -38,8 +38,8 @@ export async function writeFileAtomically(
   let existingStats: Awaited<ReturnType<typeof stat>> | null = null;
   try {
     existingStats = await stat(targetPath);
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") {
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
       throw error;
     }
   }

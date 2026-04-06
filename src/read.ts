@@ -159,50 +159,30 @@ export function registerReadTool(pi: ExtensionAPI): void {
       throwIfAborted(signal);
       try {
         await fsAccess(absolutePath, constants.R_OK);
-      } catch {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `File not found or not readable: ${rawPath}`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+      } catch (error: unknown) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          throw new Error(`File not found: ${rawPath}`);
+        }
+        if (code === "EACCES" || code === "EPERM") {
+          throw new Error(`File is not readable: ${rawPath}`);
+        }
+        throw new Error(`Cannot access file: ${rawPath}`);
       }
 
       throwIfAborted(signal);
       const fileKind = await classifyFileKind(absolutePath);
       if (fileKind.kind === "directory") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Path is a directory: ${rawPath}. Use ls to inspect directories.`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+        throw new Error(`Path is a directory: ${rawPath}. Use ls to inspect directories.`);
       }
 
       if (fileKind.kind === "binary") {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Path is a binary file: ${rawPath} (${fileKind.description}). Hashline read only supports UTF-8 text files and supported images.`,
-            },
-          ],
-          isError: true,
-          details: {},
-        };
+        throw new Error(`Path is a binary file: ${rawPath} (${fileKind.description}). Hashline read only supports UTF-8 text files and supported images.`);
       }
 
       if (fileKind.kind === "image") {
         const builtinRead = createReadTool(ctx.cwd);
-        return builtinRead.execute(_toolCallId, params, signal, _onUpdate);
+        return builtinRead.execute(_toolCallId, params, signal, _onUpdate, ctx);
       }
 
       throwIfAborted(signal);
